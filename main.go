@@ -9,7 +9,7 @@ import (
 
 	"github.com/cloudflare/cloudflare-go"
 	"github.com/namsral/flag"
-	"github.com/nelkinda/health-go"
+	health "github.com/nelkinda/health-go"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	log "github.com/sirupsen/logrus"
 )
@@ -106,8 +106,9 @@ func fetchMetrics(deniedMetricsSet MetricsSet) {
 	accounts := fetchAccounts()
 	filteredZones := filterExcludedZones(filterZones(zones, getTargetZones()), getExcludedZones())
 
-	for _, a := range accounts {
-		go fetchWorkerAnalytics(a, &wg)
+	for _, account := range accounts {
+		go fetchWorkerAnalytics(account, &wg)
+		go fetchDnsFirewallAnalytics(account, &wg, deniedMetricsSet)
 	}
 
 	// Make requests in groups of cfgBatchSize to avoid rate limit
