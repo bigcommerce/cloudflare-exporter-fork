@@ -47,6 +47,7 @@ const (
 	workerDurationMetricName                     MetricName = "cloudflare_worker_duration"
 	poolHealthStatusMetricName                   MetricName = "cloudflare_zone_pool_health_status"
 	poolRequestsTotalMetricName                  MetricName = "cloudflare_zone_pool_requests_total"
+	dnsFirewallQueryCountMetricName              MetricName = "cloudflare_dns_firewall_query_count"
 )
 
 type MetricsSet map[MetricName]struct{}
@@ -243,6 +244,12 @@ var (
 	},
 		[]string{"zone", "load_balancer_name", "pool_name", "origin_name"},
 	)
+
+	dnsFirewallQueryCount = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: dnsFirewallQueryCountMetricName.String(),
+		Help: "DNS Firewall query count by query type and response code",
+	}, []string{"account_id", "account_name", "dns_firewall_id", "query_type", "response_code"},
+	)
 )
 
 func buildAllMetricsSet() MetricsSet {
@@ -277,6 +284,7 @@ func buildAllMetricsSet() MetricsSet {
 	allMetricsSet.Add(workerDurationMetricName)
 	allMetricsSet.Add(poolHealthStatusMetricName)
 	allMetricsSet.Add(poolRequestsTotalMetricName)
+	allMetricsSet.Add(dnsFirewallQueryCountMetricName)
 	return allMetricsSet
 }
 
@@ -383,6 +391,9 @@ func mustRegisterMetrics(deniedMetrics MetricsSet) {
 	if !deniedMetrics.Has(poolRequestsTotalMetricName) {
 		prometheus.MustRegister(poolRequestsTotal)
 	}
+	if !deniedMetrics.Has(dnsFirewallQueryCountMetricName) {
+		prometheus.MustRegister(dnsFirewallQueryCount)
+	}
 }
 
 func fetchWorkerAnalytics(account cloudflare.Account, wg *sync.WaitGroup) {
@@ -406,6 +417,30 @@ func fetchWorkerAnalytics(account cloudflare.Account, wg *sync.WaitGroup) {
 			workerDuration.With(prometheus.Labels{"script_name": w.Dimensions.ScriptName, "quantile": "P75"}).Set(float64(w.Quantiles.DurationP75))
 			workerDuration.With(prometheus.Labels{"script_name": w.Dimensions.ScriptName, "quantile": "P99"}).Set(float64(w.Quantiles.DurationP99))
 			workerDuration.With(prometheus.Labels{"script_name": w.Dimensions.ScriptName, "quantile": "P999"}).Set(float64(w.Quantiles.DurationP999))
+		}
+	}
+}
+
+func fetchDnsFirewallAnalytics(account cloudflare.Account, wg *sync.WaitGroup, deniedMetricsSet MetricsSet) {
+	wg.Add(1)
+	defer wg.Done()
+
+	r, err := fetchDnsFirewallTotals(account.ID)
+	if err != nil {
+		return
+	}
+
+	for _, a := range r.Viewer.Accounts {
+		for _, d := range a.DnsFirewallAnalyticsAdaptiveGroups {
+			if !deniedMetricsSet.Has(dnsFirewallQueryCountMetricName) {
+				dnsFirewallQueryCount.WithLabelValues(
+					account.ID,
+					account.Name,
+					d.Dimensions.ClusterTag,
+					d.Dimensions.QueryType,
+					d.Dimensions.ResponseCode,
+				).Set(float64(d.Count))
+			}
 		}
 	}
 }

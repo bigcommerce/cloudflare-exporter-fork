@@ -221,6 +221,24 @@ type lbResp struct {
 	ZoneTag string `json:"zoneTag"`
 }
 
+type cloudflareResponseDnsFirewall struct {
+	Viewer struct {
+		Accounts []dnsFirewallAccountResp `json:"accounts"`
+	} `json:"viewer"`
+}
+
+type dnsFirewallAccountResp struct {
+	DnsFirewallAnalyticsAdaptiveGroups []struct {
+		Count      uint64 `json:"count"`
+		Dimensions struct {
+			ClusterTag   string `json:"clusterTag"`
+			QueryType    string `json:"queryType"`
+			ResponseCode string `json:"responseCode"`
+		} `json:"dimensions"`
+	} `json:"dnsFirewallAnalyticsAdaptiveGroups"`
+	AccountTag string `json:"accountTag"`
+}
+
 func fetchZones() []cloudflare.Zone {
 	var api *cloudflare.API
 	var err error
@@ -606,4 +624,53 @@ func filterNonFreePlanZones(zones []cloudflare.Zone) (filteredZones []cloudflare
 		}
 	}
 	return
+}
+
+func fetchDnsFirewallTotals(accountID string) (*cloudflareResponseDnsFirewall, error) {
+	now := time.Now().Add(-time.Duration(cfgScrapeDelay) * time.Second).UTC()
+	s := 60 * time.Second
+	now = now.Truncate(s)
+	oneHourAgo := now.Add(-60 * time.Minute)
+
+	request := graphql.NewRequest(`
+query ($accountID: string, $mintime: Time!, $maxtime: Time!, $limit: Int!) {
+	viewer {
+		accounts(filter: { accountTag: $accountID }) {
+			accountTag
+			dnsFirewallAnalyticsAdaptiveGroups(
+				limit: $limit
+				filter: { datetime_geq: $mintime, datetime_lt: $maxtime }
+			) {
+				count
+				dimensions {
+					clusterTag
+					queryType
+					responseCode
+				}
+			}
+		}
+	}
+}
+`)
+	if len(cfgCfAPIToken) > 0 {
+		request.Header.Set("Authorization", "Bearer "+cfgCfAPIToken)
+	} else {
+		request.Header.Set("X-AUTH-EMAIL", cfgCfAPIEmail)
+		request.Header.Set("X-AUTH-KEY", cfgCfAPIKey)
+	}
+	request.Var("limit", 9999)
+	request.Var("maxtime", now)
+	request.Var("mintime", oneHourAgo)
+	request.Var("accountID", accountID)
+
+	ctx := context.Background()
+	graphqlClient := graphql.NewClient(cfGraphQLEndpoint)
+
+	var resp cloudflareResponseDnsFirewall
+	if err := graphqlClient.Run(ctx, request, &resp); err != nil {
+		log.Error(err)
+		return nil, err
+	}
+
+	return &resp, nil
 }
