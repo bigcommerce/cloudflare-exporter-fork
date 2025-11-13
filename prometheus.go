@@ -501,6 +501,9 @@ func mustRegisterMetrics(deniedMetrics MetricsSet) {
 	if !deniedMetrics.Has(tunnelConnectorActiveConnectionsMetricName) {
 		prometheus.MustRegister(tunnelConnectorActiveConnections)
 	}
+	if !deniedMetrics.Has(dnsFirewallQueryCountMetricName) {
+		prometheus.MustRegister(dnsFirewallQueryCount)
+	}
 }
 
 func fetchLoadblancerPoolsHealth(account cfaccounts.Account, wg *sync.WaitGroup, deniedMetrics MetricsSet) {
@@ -535,9 +538,6 @@ func fetchLoadblancerPoolsHealth(account cfaccounts.Account, wg *sync.WaitGroup,
 					"ip":          o.Address,
 				}).Set(float64(healthy))
 		}
-	}
-	if !deniedMetrics.Has(dnsFirewallQueryCountMetricName) {
-		prometheus.MustRegister(dnsFirewallQueryCount)
 	}
 }
 
@@ -693,17 +693,14 @@ func fetchZoneColocationAnalytics(zones []cfzones.Zone, wg *sync.WaitGroup, deni
 		cg := z.ColoGroups
 		name, account := findZoneAccountName(zones, z.ZoneTag)
 		for _, c := range cg {
-			zoneColocationVisits.With(prometheus.Labels{"zone": name, "account": account, "colocation": c.Dimensions.ColoCode, "host": c.Dimensions.Host}).Add(float64(c.Sum.Visits))
-			zoneColocationEdgeResponseBytes.With(prometheus.Labels{"zone": name, "account": account, "colocation": c.Dimensions.ColoCode, "host": c.Dimensions.Host}).Add(float64(c.Sum.EdgeResponseBytes))
-			zoneColocationRequestsTotal.With(prometheus.Labels{"zone": name, "account": account, "colocation": c.Dimensions.ColoCode, "host": c.Dimensions.Host}).Add(float64(c.Count))
 			if !deniedMetricsSet.Has(zoneColocationVisitsMetricName) {
-				zoneColocationVisits.With(prometheus.Labels{"zone": name, "colocation": c.Dimensions.ColoCode, "host": c.Dimensions.Host}).Add(float64(c.Sum.Visits))
+				zoneColocationVisits.With(prometheus.Labels{"zone": name, "account": account, "colocation": c.Dimensions.ColoCode, "host": c.Dimensions.Host}).Add(float64(c.Sum.Visits))
 			}
 			if !deniedMetricsSet.Has(zoneColocationEdgeResponseBytesMetricName) {
-				zoneColocationEdgeResponseBytes.With(prometheus.Labels{"zone": name, "colocation": c.Dimensions.ColoCode, "host": c.Dimensions.Host}).Add(float64(c.Sum.EdgeResponseBytes))
+				zoneColocationEdgeResponseBytes.With(prometheus.Labels{"zone": name, "account": account, "colocation": c.Dimensions.ColoCode, "host": c.Dimensions.Host}).Add(float64(c.Sum.EdgeResponseBytes))
 			}
 			if !deniedMetricsSet.Has(zoneColocationRequestsTotalMetricName) {
-				zoneColocationRequestsTotal.With(prometheus.Labels{"zone": name, "colocation": c.Dimensions.ColoCode, "host": c.Dimensions.Host}).Add(float64(c.Count))
+				zoneColocationRequestsTotal.With(prometheus.Labels{"zone": name, "account": account, "colocation": c.Dimensions.ColoCode, "host": c.Dimensions.Host}).Add(float64(c.Count))
 			}
 		}
 	}
