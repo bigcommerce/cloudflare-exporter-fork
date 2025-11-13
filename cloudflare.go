@@ -217,7 +217,17 @@ type zoneResp struct {
 			OriginResponseStatus  uint16 `json:"originResponseStatus"`
 			ClientCountryName     string `json:"clientCountryName"`
 			ClientRequestHTTPHost string `json:"clientRequestHTTPHost"`
+			OriginIP              string `json:"originIP"`
 		} `json:"dimensions"`
+		Quantiles struct {
+			EdgeTimeToFirstByteMsP50 int `json:"edgeTimeToFirstByteMsP50"`
+			EdgeTimeToFirstByteMsP95 int `json:"edgeTimeToFirstByteMsP95"`
+			EdgeTimeToFirstByteMsP99 int `json:"edgeTimeToFirstByteMsP99"`
+		} `json:"quantiles"`
+		Ratio struct {
+			Status5xx float64 `json:"status5xx"`
+			Status4xx float64 `json:"status4xx"`
+		} `json:"ratio"`
 	} `json:"httpRequestsAdaptiveGroups"`
 
 	HTTPRequestsEdgeCountryHost []struct {
@@ -482,6 +492,52 @@ func fetchAccounts() []cfaccounts.Account {
 		cfAccounts = append(cfAccounts, account)
 	}
 	return cfAccounts
+}
+
+func fetchZone5mStats(zoneIDs []string) (*cloudflareResponse, error) {
+	request := graphql.NewRequest(`
+query ($zoneIDs: [String!], $mintime: Time!, $maxtime: Time!, $limit: Int!) {
+  viewer {
+    zones(filter: { zoneTag_in: $zoneIDs }) {
+	 zoneTag
+     httpRequestsAdaptiveGroups(filter:{datetime_gt: $start, datetime_lt: $end}, limit: $limit) {
+    	dimensions {
+        	originIP
+      	}
+      	ratio {
+			status4xx
+        	status5xx
+      	}
+		quantiles {
+        	edgeTimeToFirstByteMsP50
+        	edgeTimeToFirstByteMsP95
+        	edgeTimeToFirstByteMsP99
+      	}
+      	count
+	}
+  }
+  }
+`)
+
+	now, _ := GetTimeRange()
+	request.Var("limit", gqlQueryLimit)
+	request.Var("maxtime", now)
+	request.Var("mintime", now.Add(-5*time.Minute))
+	request.Var("zoneIDs", zoneIDs)
+
+	gql.Mu.RLock()
+	defer gql.Mu.RUnlock()
+
+	ctx, cancel := context.WithTimeout(context.Background(), cftimeout)
+	defer cancel()
+
+	var resp cloudflareResponse
+	if err := gql.Client.Run(ctx, request, &resp); err != nil {
+		log.Errorf("failed to fetch zone 5-minute totals, err:%v", err)
+		return nil, err
+	}
+
+	return &resp, nil
 }
 
 func fetchZoneTotals(zoneIDs []string) (*cloudflareResponse, error) {

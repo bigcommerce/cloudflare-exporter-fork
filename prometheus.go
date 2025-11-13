@@ -26,6 +26,8 @@ const (
 	zoneRequestContentTypeMetricName             MetricName = "cloudflare_zone_requests_content_type"
 	zoneRequestCountryMetricName                 MetricName = "cloudflare_zone_requests_country"
 	zoneRequestHTTPStatusMetricName              MetricName = "cloudflare_zone_requests_status"
+	zoneRequestStatus5mRatioMetricName           MetricName = "cloudflare_zone_requests_status_5m_ratio"
+	zoneRequestEdgeTTFB5mQuantilesMetricName     MetricName = "cloudflare_zone_requests_edge_ttfb_5m_quantiles"
 	zoneRequestBrowserMapMetricName              MetricName = "cloudflare_zone_requests_browser_map_page_views_count"
 	zoneRequestOriginStatusCountryHostMetricName MetricName = "cloudflare_zone_requests_origin_status_country_host"
 	zoneRequestStatusCountryHostMetricName       MetricName = "cloudflare_zone_requests_status_country_host"
@@ -110,6 +112,18 @@ var (
 		Name: zoneRequestHTTPStatusMetricName.String(),
 		Help: "Number of request for zone per HTTP status",
 	}, []string{"zone", "account", "status"},
+	)
+
+	zoneRequestStatus5mRatio = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: zoneRequestStatus5mRatioMetricName.String(),
+		Help: "Ratio of 4xx and 5xx responses over the past 5 minutes",
+	}, []string{"zone", "account", "origin_ip", "status_group"},
+	)
+
+	zoneRequestEdgeTTFB5mQuantiles = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: zoneRequestEdgeTTFB5mQuantilesMetricName.String(),
+		Help: "Time to first byte (TTFB) quantiles over the past 5 minutes",
+	}, []string{"zone", "account", "origin_ip", "quantile"},
 	)
 
 	zoneRequestBrowserMap = prometheus.NewCounterVec(prometheus.CounterOpts{
@@ -330,6 +344,8 @@ func buildAllMetricsSet() MetricsSet {
 	allMetricsSet.Add(zoneRequestContentTypeMetricName)
 	allMetricsSet.Add(zoneRequestCountryMetricName)
 	allMetricsSet.Add(zoneRequestHTTPStatusMetricName)
+	allMetricsSet.Add(zoneRequestStatus5mRatioMetricName)
+	allMetricsSet.Add(zoneRequestEdgeTTFB5mQuantilesMetricName)
 	allMetricsSet.Add(zoneRequestBrowserMapMetricName)
 	allMetricsSet.Add(zoneRequestOriginStatusCountryHostMetricName)
 	allMetricsSet.Add(zoneRequestStatusCountryHostMetricName)
@@ -398,6 +414,12 @@ func mustRegisterMetrics(deniedMetrics MetricsSet) {
 	}
 	if !deniedMetrics.Has(zoneRequestHTTPStatusMetricName) {
 		prometheus.MustRegister(zoneRequestHTTPStatus)
+	}
+	if !deniedMetrics.Has(zoneRequestStatus5mRatioMetricName) {
+		prometheus.MustRegister(zoneRequestStatus5mRatio)
+	}
+	if !deniedMetrics.Has(zoneRequestEdgeTTFB5mQuantilesMetricName) {
+		prometheus.MustRegister(zoneRequestEdgeTTFB5mQuantiles)
 	}
 	if !deniedMetrics.Has(zoneRequestBrowserMapMetricName) {
 		prometheus.MustRegister(zoneRequestBrowserMap)
@@ -701,6 +723,75 @@ func fetchZoneColocationAnalytics(zones []cfzones.Zone, wg *sync.WaitGroup, deni
 			}
 			if !deniedMetricsSet.Has(zoneColocationRequestsTotalMetricName) {
 				zoneColocationRequestsTotal.With(prometheus.Labels{"zone": name, "account": account, "colocation": c.Dimensions.ColoCode, "host": c.Dimensions.Host}).Add(float64(c.Count))
+			}
+		}
+	}
+}
+
+func fetchZoneAdaptiveHTTPStats(zones []cfzones.Zone, wg *sync.WaitGroup, deniedMetricsSet MetricsSet) {
+	wg.Add(1)
+	defer wg.Done()
+
+	if deniedMetricsSet.Has(zoneRequestStatus5mRatioMetricName) && deniedMetricsSet.Has(zoneRequestEdgeTTFB5mQuantilesMetricName) {
+		return
+	}
+
+	zoneIDs := extractZoneIDs(zones)
+	if len(zoneIDs) == 0 {
+		return
+	}
+
+	r, err := fetchZone5mStats(zoneIDs)
+	if err != nil {
+		log.Error("failed to fetch analyzed zone 5-minute stats: ", err)
+		return
+	}
+
+	for _, z := range r.Viewer.Zones {
+		name, account := findZoneAccountName(zones, z.ZoneTag)
+
+		if !deniedMetricsSet.Has(zoneRequestStatus5mRatioMetricName) {
+			for _, g := range z.HTTPRequestsAdaptiveGroups {
+				zoneRequestStatus5mRatio.With(
+					prometheus.Labels{
+						"zone":         name,
+						"account":      account,
+						"origin_ip":    g.Dimensions.OriginIP,
+						"status_group": "4xx",
+					}).Add(float64(g.Ratio.Status4xx))
+				zoneRequestStatus5mRatio.With(
+					prometheus.Labels{
+						"zone":         name,
+						"account":      account,
+						"origin_ip":    g.Dimensions.OriginIP,
+						"status_group": "5xx",
+					}).Add(float64(g.Ratio.Status5xx))
+			}
+		}
+
+		if !deniedMetricsSet.Has(zoneRequestEdgeTTFB5mQuantilesMetricName) {
+			for _, g := range z.HTTPRequestsAdaptiveGroups {
+				zoneRequestEdgeTTFB5mQuantiles.With(
+					prometheus.Labels{
+						"zone":      name,
+						"account":   account,
+						"origin_ip": g.Dimensions.OriginIP,
+						"quantile":  "P50",
+					}).Set(float64(g.Quantiles.EdgeTimeToFirstByteMsP50))
+				zoneRequestEdgeTTFB5mQuantiles.With(
+					prometheus.Labels{
+						"zone":      name,
+						"account":   account,
+						"origin_ip": g.Dimensions.OriginIP,
+						"quantile":  "P95",
+					}).Set(float64(g.Quantiles.EdgeTimeToFirstByteMsP95))
+				zoneRequestEdgeTTFB5mQuantiles.With(
+					prometheus.Labels{
+						"zone":      name,
+						"account":   account,
+						"origin_ip": g.Dimensions.OriginIP,
+						"quantile":  "P99",
+					}).Set(float64(g.Quantiles.EdgeTimeToFirstByteMsP99))
 			}
 		}
 	}
