@@ -113,7 +113,7 @@ func fetchMetrics(deniedMetricsSet MetricsSet) {
 		go fetchR2StorageForAccount(a, &wg)
 		go fetchLoadblancerPoolsHealth(a, &wg, deniedMetricsSet)
 		go fetchZeroTrustAnalyticsForAccount(a, &wg)
-		go fetchDnsFirewallAnalytics(a, &wg, deniedMetricsSet)
+		go fetchDNSFirewallAnalytics(a, &wg, deniedMetricsSet)
 	}
 
 	zones := fetchZones(accounts)

@@ -646,17 +646,17 @@ func fetchLogpushAnalyticsForZone(zones []cfzones.Zone, wg *sync.WaitGroup, _ Me
 	}
 }
 
-func fetchDnsFirewallAnalytics(account cfaccounts.Account, wg *sync.WaitGroup, deniedMetricsSet MetricsSet) {
+func fetchDNSFirewallAnalytics(account cfaccounts.Account, wg *sync.WaitGroup, deniedMetricsSet MetricsSet) {
 	wg.Add(1)
 	defer wg.Done()
 
-	r, err := fetchDnsFirewallTotals(account.ID)
+	r, err := fetchDNSFirewallTotals(account.ID)
 	if err != nil {
 		return
 	}
 
 	for _, a := range r.Viewer.Accounts {
-		for _, d := range a.DnsFirewallAnalyticsAdaptiveGroups {
+		for _, d := range a.DNSFirewallAnalyticsAdaptiveGroups {
 			if !deniedMetricsSet.Has(dnsFirewallQueryCountMetricName) {
 				dnsFirewallQueryCount.WithLabelValues(
 					account.ID,

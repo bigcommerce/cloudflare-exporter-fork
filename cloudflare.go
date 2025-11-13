@@ -285,14 +285,14 @@ type lbResp struct {
 	ZoneTag string `json:"zoneTag"`
 }
 
-type cloudflareResponseDnsFirewall struct {
+type cloudflareResponseDNSFirewall struct {
 	Viewer struct {
 		Accounts []dnsFirewallAccountResp `json:"accounts"`
 	} `json:"viewer"`
 }
 
 type dnsFirewallAccountResp struct {
-	DnsFirewallAnalyticsAdaptiveGroups []struct {
+	DNSFirewallAnalyticsAdaptiveGroups []struct {
 		Count      uint64 `json:"count"`
 		Dimensions struct {
 			ClusterTag   string `json:"clusterTag"`
@@ -1020,7 +1020,7 @@ func filterNonFreePlanZones(zones []cfzones.Zone) (filteredZones []cfzones.Zone)
 	return
 }
 
-func fetchDnsFirewallTotals(accountID string) (*cloudflareResponseDnsFirewall, error) {
+func fetchDNSFirewallTotals(accountID string) (*cloudflareResponseDNSFirewall, error) {
 	request := graphql.NewRequest(`
 query ($accountID: string, $mintime: Time!, $maxtime: Time!, $limit: Int!) {
 	viewer {
@@ -1053,7 +1053,7 @@ query ($accountID: string, $mintime: Time!, $maxtime: Time!, $limit: Int!) {
 	ctx, cancel := context.WithTimeout(context.Background(), cftimeout)
 	defer cancel()
 
-	var resp cloudflareResponseDnsFirewall
+	var resp cloudflareResponseDNSFirewall
 	if err := gql.Client.Run(ctx, request, &resp); err != nil {
 		log.Errorf("error fetching DNS Firewall totals, err :%v", err)
 		return nil, err
