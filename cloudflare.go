@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"strings"
+	"time"
 
 	cf "github.com/cloudflare/cloudflare-go/v4"
 	cfaccounts "github.com/cloudflare/cloudflare-go/v4/accounts"
@@ -1020,11 +1021,6 @@ func filterNonFreePlanZones(zones []cfzones.Zone) (filteredZones []cfzones.Zone)
 }
 
 func fetchDnsFirewallTotals(accountID string) (*cloudflareResponseDnsFirewall, error) {
-	now := time.Now().Add(-time.Duration(cfgScrapeDelay) * time.Second).UTC()
-	s := 60 * time.Second
-	now = now.Truncate(s)
-	oneHourAgo := now.Add(-60 * time.Minute)
-
 	request := graphql.NewRequest(`
 query ($accountID: string, $mintime: Time!, $maxtime: Time!, $limit: Int!) {
 	viewer {
@@ -1045,23 +1041,21 @@ query ($accountID: string, $mintime: Time!, $maxtime: Time!, $limit: Int!) {
 	}
 }
 `)
-	if len(cfgCfAPIToken) > 0 {
-		request.Header.Set("Authorization", "Bearer "+cfgCfAPIToken)
-	} else {
-		request.Header.Set("X-AUTH-EMAIL", cfgCfAPIEmail)
-		request.Header.Set("X-AUTH-KEY", cfgCfAPIKey)
-	}
+	now, _ := GetTimeRange()
 	request.Var("limit", 9999)
 	request.Var("maxtime", now)
-	request.Var("mintime", oneHourAgo)
+	request.Var("mintime", now.Add(-24*time.Hour))
 	request.Var("accountID", accountID)
 
-	ctx := context.Background()
-	graphqlClient := graphql.NewClient(cfGraphQLEndpoint)
+	gql.Mu.RLock()
+	defer gql.Mu.RUnlock()
+
+	ctx, cancel := context.WithTimeout(context.Background(), cftimeout)
+	defer cancel()
 
 	var resp cloudflareResponseDnsFirewall
-	if err := graphqlClient.Run(ctx, request, &resp); err != nil {
-		log.Error(err)
+	if err := gql.Client.Run(ctx, request, &resp); err != nil {
+		log.Errorf("error fetching DNS Firewall totals, err :%v", err)
 		return nil, err
 	}
 

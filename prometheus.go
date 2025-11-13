@@ -617,7 +617,7 @@ func fetchR2StorageForAccount(account cfaccounts.Account, wg *sync.WaitGroup) {
 	}
 }
 
-func fetchLogpushAnalyticsForZone(zones []cfzones.Zone, wg *sync.WaitGroup) {
+func fetchLogpushAnalyticsForZone(zones []cfzones.Zone, wg *sync.WaitGroup, _ MetricsSet) {
 	wg.Add(1)
 	defer wg.Done()
 

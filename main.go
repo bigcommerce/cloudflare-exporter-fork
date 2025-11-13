@@ -111,7 +111,7 @@ func fetchMetrics(deniedMetricsSet MetricsSet) {
 		go fetchWorkerAnalytics(a, &wg)
 		go fetchLogpushAnalyticsForAccount(a, &wg)
 		go fetchR2StorageForAccount(a, &wg)
-		go fetchLoadblancerPoolsHealth(a, &wg)
+		go fetchLoadblancerPoolsHealth(a, &wg, deniedMetricsSet)
 		go fetchZeroTrustAnalyticsForAccount(a, &wg)
 		go fetchDnsFirewallAnalytics(a, &wg, deniedMetricsSet)
 	}
@@ -175,7 +175,7 @@ func runExporter() {
 
 	go func() {
 		for ; true; <-time.NewTicker(scrapeInterval).C {
-			go fetchMetrics(deniedMetricsSet)
+			go fetchMetrics(metricsSet)
 		}
 	}()
 
