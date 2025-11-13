@@ -506,7 +506,7 @@ func mustRegisterMetrics(deniedMetrics MetricsSet) {
 	}
 }
 
-func fetchLoadblancerPoolsHealth(account cfaccounts.Account, wg *sync.WaitGroup, deniedMetrics MetricsSet) {
+func fetchLoadblancerPoolsHealth(account cfaccounts.Account, wg *sync.WaitGroup) {
 	wg.Add(1)
 	defer wg.Done()
 
