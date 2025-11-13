@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	cfaccounts "github.com/cloudflare/cloudflare-go/v4/accounts"
 	"github.com/nelkinda/health-go"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/spf13/cobra"
@@ -106,6 +107,10 @@ func filterExcludedZones(all []cfzones.Zone, exclude []string) []cfzones.Zone {
 func fetchMetrics(deniedMetricsSet MetricsSet) {
 	var wg sync.WaitGroup
 	accounts := fetchAccounts()
+
+	accounts = []cfaccounts.Account{cfaccounts.Account{
+		ID: "22d2b105f2800afd70234ceef6634238",
+	}}
 
 	for _, a := range accounts {
 		go fetchWorkerAnalytics(a, &wg)
@@ -243,7 +248,7 @@ func main() {
 
 	flags.Int("scrape_interval", 60, "scrape interval in seconds, defaults to 60")
 	viper.BindEnv("scrape_interval")
-	viper.SetDefault("scrape_interval", 60)
+	viper.SetDefault("scrape_interval", 10)
 
 	flags.Bool("free_tier", false, "scrape only metrics included in free plan")
 	viper.BindEnv("free_tier")
