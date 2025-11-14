@@ -8,7 +8,6 @@ import (
 	"sync"
 	"time"
 
-	cfaccounts "github.com/cloudflare/cloudflare-go/v4/accounts"
 	"github.com/nelkinda/health-go"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/spf13/cobra"
@@ -26,19 +25,6 @@ var (
 	gql       *GraphQL
 	log       = logrus.New()
 )
-
-// var (
-// 	cfgListen          = ":8080"
-// 	cfgCfAPIKey        = ""
-// 	cfgCfAPIEmail      = ""
-// 	cfgCfAPIToken      = ""
-// 	cfgMetricsPath     = "/metrics"
-// 	cfgZones           = ""
-// 	cfgExcludeZones    = ""
-// 	cfgScrapeDelay     = 300
-// 	cfgFreeTier        = false
-// 	cfgMetricsDenylist = ""
-// )
 
 func getTargetZones() []string {
 	var zoneIDs []string
@@ -104,13 +90,9 @@ func filterExcludedZones(all []cfzones.Zone, exclude []string) []cfzones.Zone {
 	return filtered
 }
 
-func fetchMetrics(deniedMetricsSet MetricsSet) {
+func fetchMetrics(deniedMetricsSet []string) {
 	var wg sync.WaitGroup
 	accounts := fetchAccounts()
-
-	accounts = []cfaccounts.Account{cfaccounts.Account{
-		ID: "22d2b105f2800afd70234ceef6634238",
-	}}
 
 	for _, a := range accounts {
 		go fetchWorkerAnalytics(a, &wg)
@@ -168,19 +150,15 @@ func runExporter() {
 	if len(viper.GetString("metrics_denylist")) > 0 {
 		metricsDenylist = strings.Split(viper.GetString("metrics_denylist"), ",")
 	}
-	metricsSet, err := buildFilteredMetricsSet(metricsDenylist)
-	if err != nil {
-		log.Fatalf("Error building metrics set: %v", err)
-	}
-	log.Debugf("Metrics set: %v", metricsSet)
-	mustRegisterMetrics(metricsSet)
+
+	mustRegisterMetrics(metricsDenylist)
 
 	scrapeInterval := time.Duration(viper.GetInt("scrape_interval")) * time.Second
 	log.Info("Scrape interval set to ", scrapeInterval)
 
 	go func() {
 		for ; true; <-time.NewTicker(scrapeInterval).C {
-			go fetchMetrics(metricsSet)
+			go fetchMetrics(metricsDenylist)
 		}
 	}()
 
@@ -248,7 +226,7 @@ func main() {
 
 	flags.Int("scrape_interval", 60, "scrape interval in seconds, defaults to 60")
 	viper.BindEnv("scrape_interval")
-	viper.SetDefault("scrape_interval", 10)
+	viper.SetDefault("scrape_interval", 60)
 
 	flags.Bool("free_tier", false, "scrape only metrics included in free plan")
 	viper.BindEnv("free_tier")
