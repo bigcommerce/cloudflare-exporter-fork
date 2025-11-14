@@ -128,6 +128,7 @@ func fetchMetrics(deniedMetricsSet MetricsSet) {
 	zoneCount := len(filteredZones)
 	if zoneCount > 0 && zoneCount <= cfgraphqlreqlimit {
 		go fetchZoneAnalytics(filteredZones, &wg, deniedMetricsSet)
+		go fetchZoneAdaptiveHTTPStats(filteredZones, &wg, deniedMetricsSet)
 		go fetchZoneColocationAnalytics(filteredZones, &wg, deniedMetricsSet)
 		go fetchLoadBalancerAnalytics(filteredZones, &wg, deniedMetricsSet)
 		go fetchLogpushAnalyticsForZone(filteredZones, &wg, deniedMetricsSet)
@@ -138,6 +139,7 @@ func fetchMetrics(deniedMetricsSet MetricsSet) {
 				e = zoneCount
 			}
 			go fetchZoneAnalytics(filteredZones[s:e], &wg, deniedMetricsSet)
+			go fetchZoneAdaptiveHTTPStats(filteredZones[s:e], &wg, deniedMetricsSet)
 			go fetchZoneColocationAnalytics(filteredZones[s:e], &wg, deniedMetricsSet)
 			go fetchLoadBalancerAnalytics(filteredZones[s:e], &wg, deniedMetricsSet)
 			go fetchLogpushAnalyticsForZone(filteredZones[s:e], &wg, deniedMetricsSet)
