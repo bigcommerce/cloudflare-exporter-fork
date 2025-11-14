@@ -500,7 +500,7 @@ query ($zoneIDs: [String!], $mintime: Time!, $maxtime: Time!, $limit: Int!) {
   viewer {
     zones(filter: { zoneTag_in: $zoneIDs }) {
 	 zoneTag
-     httpRequestsAdaptiveGroups(filter:{datetime_gt: mintime, datetime_lt: $maxtime}, limit: $limit) {
+     httpRequestsAdaptiveGroups(filter:{datetime_gt: $mintime, datetime_lt: $maxtime}, limit: $limit) {
     	dimensions {
         	originIP
       	}
