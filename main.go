@@ -3,6 +3,7 @@ package main
 import (
 	"net/http"
 	_ "net/http/pprof" // #nosec G108 - pprof is controlled via enable_pprof flag
+	"os"
 	"runtime"
 	"strings"
 	"sync"
@@ -265,6 +266,7 @@ func main() {
 	viper.BindEnv("enable_pprof")
 	viper.SetDefault("enable_pprof", false)
 
+	cmd.ParseFlags(os.Args[1:])
 	viper.BindPFlags(flags)
 
 	logLevel := viper.GetString("log_level")
