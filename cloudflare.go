@@ -497,26 +497,27 @@ func fetchAccounts() []cfaccounts.Account {
 func fetchZone5mStats(zoneIDs []string) (*cloudflareResponse, error) {
 	request := graphql.NewRequest(`
 query ($zoneIDs: [String!], $mintime: Time!, $maxtime: Time!, $limit: Int!) {
-  viewer {
-    zones(filter: { zoneTag_in: $zoneIDs }) {
-	 zoneTag
-     httpRequestsAdaptiveGroups(filter:{datetime_gt: $mintime, datetime_lt: $maxtime}, limit: $limit) {
-    	dimensions {
-        	originIP
-      	}
-      	ratio {
-			status4xx
-        	status5xx
-      	}
-		quantiles {
-        	edgeTimeToFirstByteMsP50
-        	edgeTimeToFirstByteMsP95
-        	edgeTimeToFirstByteMsP99
-      	}
-      	count
-	}
-  }
-  }
+    viewer {
+        zones(filter: { zoneTag_in: $zoneIDs }) {
+            zoneTag
+            httpRequestsAdaptiveGroups(filter:{datetime_gt: $mintime, datetime_lt: $maxtime}, limit: $limit) {
+                dimensions {
+                    originIP
+                }
+                ratio {
+                    status4xx
+                    status5xx
+                }
+                quantiles {
+                    edgeTimeToFirstByteMsP50
+                    edgeTimeToFirstByteMsP95
+                    edgeTimeToFirstByteMsP99
+                }
+                count
+            }
+        }
+    }
+}
 `)
 
 	now, _ := GetTimeRange()
