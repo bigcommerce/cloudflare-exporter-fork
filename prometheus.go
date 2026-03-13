@@ -694,6 +694,7 @@ func fetchKVAnalytics(account cfaccounts.Account, wg *sync.WaitGroup) {
 		return
 	}
 
+	log.Info("fetched KV analytics")
 	accountName := strings.ToLower(strings.ReplaceAll(account.Name, " ", "-"))
 
 	for _, a := range r.Viewer.Accounts {
@@ -717,6 +718,7 @@ func fetchWorkerSubrequestAnalytics(account cfaccounts.Account, wg *sync.WaitGro
 		return
 	}
 
+	log.Info("fetched worker subrequest analytics")
 	accountName := strings.ToLower(strings.ReplaceAll(account.Name, " ", "-"))
 
 	for _, a := range r.Viewer.Accounts {
@@ -740,12 +742,15 @@ func fetchQueueAnalytics(account cfaccounts.Account, wg *sync.WaitGroup) {
 		return
 	}
 
+	log.Info("fetched queue names")
+
 	r, err := fetchQueueMetrics(account.ID)
 	if err != nil {
 		log.Error("failed to fetch queue metrics for account ", account.ID, ": ", err)
 		return
 	}
 
+	log.Info("fetched queue metrics")
 	accountName := strings.ToLower(strings.ReplaceAll(account.Name, " ", "-"))
 
 	for _, a := range r.Viewer.Accounts {

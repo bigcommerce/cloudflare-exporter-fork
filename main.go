@@ -154,6 +154,7 @@ func fetchMetrics(deniedMetricsSet MetricsSet) {
 }
 
 func runExporter() {
+	log.Info("Starting cloudflare_exporter with KV, subrequests, and queue metrics enabled")
 	cfgMetricsPath := viper.GetString("metrics_path")
 
 	// Handle pprof configuration
@@ -195,7 +196,7 @@ func runExporter() {
 	h := health.New(health.Health{})
 	http.HandleFunc("/health", h.Handler)
 
-	log.Info("Beginning to serve metrics on ", viper.GetString("listen"), cfgMetricsPath)
+	log.Info("(live change) Beginning to serve metrics on ", viper.GetString("listen"), cfgMetricsPath)
 
 	server := &http.Server{
 		Addr:              viper.GetString("listen"),
