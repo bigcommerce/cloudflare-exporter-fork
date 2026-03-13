@@ -50,6 +50,14 @@ const (
 	workerErrorsMetricName                       MetricName = "cloudflare_worker_errors_count"
 	workerCPUTimeMetricName                      MetricName = "cloudflare_worker_cpu_time"
 	workerDurationMetricName                     MetricName = "cloudflare_worker_duration"
+	workerWallTimeMetricName                     MetricName = "cloudflare_worker_wall_time"
+	kvRequestsMetricName                         MetricName = "cloudflare_kv_requests_count"
+	kvLatencyMetricName                          MetricName = "cloudflare_kv_latency"
+	workerSubrequestsCountMetricName             MetricName = "cloudflare_worker_subrequests_count"
+	workerSubrequestTimeMetricName               MetricName = "cloudflare_worker_subrequest_time"
+	queueBacklogMessagesMetricName               MetricName = "cloudflare_queue_backlog_messages"
+	queueBacklogBytesMetricName                  MetricName = "cloudflare_queue_backlog_bytes"
+	queueConsumerConcurrencyMetricName           MetricName = "cloudflare_queue_consumer_concurrency"
 	poolHealthStatusMetricName                   MetricName = "cloudflare_zone_pool_health_status"
 	poolRequestsTotalMetricName                  MetricName = "cloudflare_zone_pool_requests_total"
 	poolOriginHealthStatusMetricName             MetricName = "cloudflare_pool_origin_health_status"
@@ -258,6 +266,54 @@ var (
 	}, []string{"script_name", "account", "status", "quantile"},
 	)
 
+	workerWallTime = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: workerWallTimeMetricName.String(),
+		Help: "Wall time quantiles by script name (microseconds)",
+	}, []string{"script_name", "account", "status", "quantile"},
+	)
+
+	kvRequests = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: kvRequestsMetricName.String(),
+		Help: "Number of KV operations by namespace and action type",
+	}, []string{"namespace_id", "action_type", "account"},
+	)
+
+	kvLatency = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: kvLatencyMetricName.String(),
+		Help: "KV operation latency quantiles (milliseconds)",
+	}, []string{"namespace_id", "action_type", "account", "quantile"},
+	)
+
+	workerSubrequestsCount = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: workerSubrequestsCountMetricName.String(),
+		Help: "Number of subrequests by script name",
+	}, []string{"script_name", "account"},
+	)
+
+	workerSubrequestTime = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: workerSubrequestTimeMetricName.String(),
+		Help: "Subrequest response time quantiles (microseconds)",
+	}, []string{"script_name", "account", "quantile"},
+	)
+
+	queueBacklogMessages = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: queueBacklogMessagesMetricName.String(),
+		Help: "Average number of messages in queue backlog",
+	}, []string{"queue_name", "account"},
+	)
+
+	queueBacklogBytes = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: queueBacklogBytesMetricName.String(),
+		Help: "Average backlog size in bytes",
+	}, []string{"queue_name", "account"},
+	)
+
+	queueConsumerConcurrency = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: queueConsumerConcurrencyMetricName.String(),
+		Help: "Average number of concurrent queue consumers",
+	}, []string{"queue_name", "account"},
+	)
+
 	poolHealthStatus = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 		Name: poolHealthStatusMetricName.String(),
 		Help: "Reports the health of a pool, 1 for healthy, 0 for unhealthy.",
@@ -368,6 +424,14 @@ func buildAllMetricsSet() MetricsSet {
 	allMetricsSet.Add(workerErrorsMetricName)
 	allMetricsSet.Add(workerCPUTimeMetricName)
 	allMetricsSet.Add(workerDurationMetricName)
+	allMetricsSet.Add(workerWallTimeMetricName)
+	allMetricsSet.Add(kvRequestsMetricName)
+	allMetricsSet.Add(kvLatencyMetricName)
+	allMetricsSet.Add(workerSubrequestsCountMetricName)
+	allMetricsSet.Add(workerSubrequestTimeMetricName)
+	allMetricsSet.Add(queueBacklogMessagesMetricName)
+	allMetricsSet.Add(queueBacklogBytesMetricName)
+	allMetricsSet.Add(queueConsumerConcurrencyMetricName)
 	allMetricsSet.Add(poolHealthStatusMetricName)
 	allMetricsSet.Add(poolOriginHealthStatusMetricName)
 	allMetricsSet.Add(poolRequestsTotalMetricName)
@@ -487,6 +551,30 @@ func mustRegisterMetrics(deniedMetrics MetricsSet) {
 	if !deniedMetrics.Has(workerDurationMetricName) {
 		prometheus.MustRegister(workerDuration)
 	}
+	if !deniedMetrics.Has(workerWallTimeMetricName) {
+		prometheus.MustRegister(workerWallTime)
+	}
+	if !deniedMetrics.Has(kvRequestsMetricName) {
+		prometheus.MustRegister(kvRequests)
+	}
+	if !deniedMetrics.Has(kvLatencyMetricName) {
+		prometheus.MustRegister(kvLatency)
+	}
+	if !deniedMetrics.Has(workerSubrequestsCountMetricName) {
+		prometheus.MustRegister(workerSubrequestsCount)
+	}
+	if !deniedMetrics.Has(workerSubrequestTimeMetricName) {
+		prometheus.MustRegister(workerSubrequestTime)
+	}
+	if !deniedMetrics.Has(queueBacklogMessagesMetricName) {
+		prometheus.MustRegister(queueBacklogMessages)
+	}
+	if !deniedMetrics.Has(queueBacklogBytesMetricName) {
+		prometheus.MustRegister(queueBacklogBytes)
+	}
+	if !deniedMetrics.Has(queueConsumerConcurrencyMetricName) {
+		prometheus.MustRegister(queueConsumerConcurrency)
+	}
 	if !deniedMetrics.Has(poolHealthStatusMetricName) {
 		prometheus.MustRegister(poolHealthStatus)
 	}
@@ -588,6 +676,93 @@ func fetchWorkerAnalytics(account cfaccounts.Account, wg *sync.WaitGroup) {
 			workerDuration.With(prometheus.Labels{"script_name": w.Dimensions.ScriptName, "account": accountName, "status": w.Dimensions.Status, "quantile": "P75"}).Set(float64(w.Quantiles.DurationP75))
 			workerDuration.With(prometheus.Labels{"script_name": w.Dimensions.ScriptName, "account": accountName, "status": w.Dimensions.Status, "quantile": "P99"}).Set(float64(w.Quantiles.DurationP99))
 			workerDuration.With(prometheus.Labels{"script_name": w.Dimensions.ScriptName, "account": accountName, "status": w.Dimensions.Status, "quantile": "P999"}).Set(float64(w.Quantiles.DurationP999))
+			workerWallTime.With(prometheus.Labels{"script_name": w.Dimensions.ScriptName, "account": accountName, "status": w.Dimensions.Status, "quantile": "P50"}).Set(float64(w.Quantiles.WallTimeP50))
+			workerWallTime.With(prometheus.Labels{"script_name": w.Dimensions.ScriptName, "account": accountName, "status": w.Dimensions.Status, "quantile": "P75"}).Set(float64(w.Quantiles.WallTimeP75))
+			workerWallTime.With(prometheus.Labels{"script_name": w.Dimensions.ScriptName, "account": accountName, "status": w.Dimensions.Status, "quantile": "P99"}).Set(float64(w.Quantiles.WallTimeP99))
+			workerWallTime.With(prometheus.Labels{"script_name": w.Dimensions.ScriptName, "account": accountName, "status": w.Dimensions.Status, "quantile": "P999"}).Set(float64(w.Quantiles.WallTimeP999))
+		}
+	}
+}
+
+func fetchKVAnalytics(account cfaccounts.Account, wg *sync.WaitGroup) {
+	wg.Add(1)
+	defer wg.Done()
+
+	r, err := fetchKVOperations(account.ID)
+	if err != nil {
+		log.Error("failed to fetch KV analytics for account ", account.ID, ": ", err)
+		return
+	}
+
+	accountName := strings.ToLower(strings.ReplaceAll(account.Name, " ", "-"))
+
+	for _, a := range r.Viewer.Accounts {
+		for _, kv := range a.KvOperationsAdaptiveGroups {
+			kvRequests.With(prometheus.Labels{"namespace_id": kv.Dimensions.NamespaceID, "action_type": kv.Dimensions.ActionType, "account": accountName}).Add(float64(kv.Sum.Requests))
+			kvLatency.With(prometheus.Labels{"namespace_id": kv.Dimensions.NamespaceID, "action_type": kv.Dimensions.ActionType, "account": accountName, "quantile": "P50"}).Set(float64(kv.Quantiles.LatencyMsP50))
+			kvLatency.With(prometheus.Labels{"namespace_id": kv.Dimensions.NamespaceID, "action_type": kv.Dimensions.ActionType, "account": accountName, "quantile": "P75"}).Set(float64(kv.Quantiles.LatencyMsP75))
+			kvLatency.With(prometheus.Labels{"namespace_id": kv.Dimensions.NamespaceID, "action_type": kv.Dimensions.ActionType, "account": accountName, "quantile": "P99"}).Set(float64(kv.Quantiles.LatencyMsP99))
+			kvLatency.With(prometheus.Labels{"namespace_id": kv.Dimensions.NamespaceID, "action_type": kv.Dimensions.ActionType, "account": accountName, "quantile": "P999"}).Set(float64(kv.Quantiles.LatencyMsP999))
+		}
+	}
+}
+
+func fetchWorkerSubrequestAnalytics(account cfaccounts.Account, wg *sync.WaitGroup) {
+	wg.Add(1)
+	defer wg.Done()
+
+	r, err := fetchWorkerSubrequests(account.ID)
+	if err != nil {
+		log.Error("failed to fetch worker subrequest analytics for account ", account.ID, ": ", err)
+		return
+	}
+
+	accountName := strings.ToLower(strings.ReplaceAll(account.Name, " ", "-"))
+
+	for _, a := range r.Viewer.Accounts {
+		for _, s := range a.WorkersSubrequestsAdaptiveGroups {
+			workerSubrequestsCount.With(prometheus.Labels{"script_name": s.Dimensions.ScriptName, "account": accountName}).Add(float64(s.Sum.Subrequests))
+			workerSubrequestTime.With(prometheus.Labels{"script_name": s.Dimensions.ScriptName, "account": accountName, "quantile": "P50"}).Set(float64(s.Quantiles.TimeToResponseUsP50))
+			workerSubrequestTime.With(prometheus.Labels{"script_name": s.Dimensions.ScriptName, "account": accountName, "quantile": "P75"}).Set(float64(s.Quantiles.TimeToResponseUsP75))
+			workerSubrequestTime.With(prometheus.Labels{"script_name": s.Dimensions.ScriptName, "account": accountName, "quantile": "P99"}).Set(float64(s.Quantiles.TimeToResponseUsP99))
+			workerSubrequestTime.With(prometheus.Labels{"script_name": s.Dimensions.ScriptName, "account": accountName, "quantile": "P999"}).Set(float64(s.Quantiles.TimeToResponseUsP999))
+		}
+	}
+}
+
+func fetchQueueAnalytics(account cfaccounts.Account, wg *sync.WaitGroup) {
+	wg.Add(1)
+	defer wg.Done()
+
+	queueNames, err := fetchQueueNames(account.ID)
+	if err != nil {
+		log.Error("failed to fetch queue names for account ", account.ID, ": ", err)
+		return
+	}
+
+	r, err := fetchQueueMetrics(account.ID)
+	if err != nil {
+		log.Error("failed to fetch queue metrics for account ", account.ID, ": ", err)
+		return
+	}
+
+	accountName := strings.ToLower(strings.ReplaceAll(account.Name, " ", "-"))
+
+	for _, a := range r.Viewer.Accounts {
+		for _, b := range a.QueueBacklogAdaptiveGroups {
+			queueName := b.Dimensions.QueueID
+			if name, ok := queueNames[b.Dimensions.QueueID]; ok {
+				queueName = name
+			}
+			queueBacklogMessages.With(prometheus.Labels{"queue_name": queueName, "account": accountName}).Set(b.Avg.Messages)
+			queueBacklogBytes.With(prometheus.Labels{"queue_name": queueName, "account": accountName}).Set(b.Avg.Bytes)
+		}
+		for _, c := range a.QueueConsumerMetricsAdaptiveGroups {
+			queueName := c.Dimensions.QueueID
+			if name, ok := queueNames[c.Dimensions.QueueID]; ok {
+				queueName = name
+			}
+			queueConsumerConcurrency.With(prometheus.Labels{"queue_name": queueName, "account": accountName}).Set(c.Avg.Concurrency)
 		}
 	}
 }
