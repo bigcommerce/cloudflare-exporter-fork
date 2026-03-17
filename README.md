@@ -96,6 +96,7 @@ Note: `ZONE_<name>` configuration is not supported as flag.
 ```
 # HELP cloudflare_worker_cpu_time CPU time quantiles by script name
 # HELP cloudflare_worker_duration Duration quantiles by script name (GB*s)
+# HELP cloudflare_worker_wall_time Wall time quantiles by script name (microseconds)
 # HELP cloudflare_worker_errors_count Number of errors by script name
 # HELP cloudflare_worker_requests_count Number of requests sent to worker by script name
 # HELP cloudflare_zone_bandwidth_cached Cached bandwidth per zone in bytes
