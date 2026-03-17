@@ -50,6 +50,7 @@ const (
 	workerErrorsMetricName                       MetricName = "cloudflare_worker_errors_count"
 	workerCPUTimeMetricName                      MetricName = "cloudflare_worker_cpu_time"
 	workerDurationMetricName                     MetricName = "cloudflare_worker_duration"
+	workerWallTimeMetricName                     MetricName = "cloudflare_worker_wall_time"
 	poolHealthStatusMetricName                   MetricName = "cloudflare_zone_pool_health_status"
 	poolRequestsTotalMetricName                  MetricName = "cloudflare_zone_pool_requests_total"
 	poolOriginHealthStatusMetricName             MetricName = "cloudflare_pool_origin_health_status"
@@ -258,6 +259,12 @@ var (
 	}, []string{"script_name", "account", "status", "quantile"},
 	)
 
+	workerWallTime = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: workerWallTimeMetricName.String(),
+		Help: "Wall time quantiles by script name (microseconds)",
+	}, []string{"script_name", "account", "status", "quantile"},
+	)
+
 	poolHealthStatus = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 		Name: poolHealthStatusMetricName.String(),
 		Help: "Reports the health of a pool, 1 for healthy, 0 for unhealthy.",
@@ -368,6 +375,7 @@ func buildAllMetricsSet() MetricsSet {
 	allMetricsSet.Add(workerErrorsMetricName)
 	allMetricsSet.Add(workerCPUTimeMetricName)
 	allMetricsSet.Add(workerDurationMetricName)
+	allMetricsSet.Add(workerWallTimeMetricName)
 	allMetricsSet.Add(poolHealthStatusMetricName)
 	allMetricsSet.Add(poolOriginHealthStatusMetricName)
 	allMetricsSet.Add(poolRequestsTotalMetricName)
@@ -487,6 +495,9 @@ func mustRegisterMetrics(deniedMetrics MetricsSet) {
 	if !deniedMetrics.Has(workerDurationMetricName) {
 		prometheus.MustRegister(workerDuration)
 	}
+	if !deniedMetrics.Has(workerWallTimeMetricName) {
+		prometheus.MustRegister(workerWallTime)
+	}
 	if !deniedMetrics.Has(poolHealthStatusMetricName) {
 		prometheus.MustRegister(poolHealthStatus)
 	}
@@ -588,6 +599,10 @@ func fetchWorkerAnalytics(account cfaccounts.Account, wg *sync.WaitGroup) {
 			workerDuration.With(prometheus.Labels{"script_name": w.Dimensions.ScriptName, "account": accountName, "status": w.Dimensions.Status, "quantile": "P75"}).Set(float64(w.Quantiles.DurationP75))
 			workerDuration.With(prometheus.Labels{"script_name": w.Dimensions.ScriptName, "account": accountName, "status": w.Dimensions.Status, "quantile": "P99"}).Set(float64(w.Quantiles.DurationP99))
 			workerDuration.With(prometheus.Labels{"script_name": w.Dimensions.ScriptName, "account": accountName, "status": w.Dimensions.Status, "quantile": "P999"}).Set(float64(w.Quantiles.DurationP999))
+			workerWallTime.With(prometheus.Labels{"script_name": w.Dimensions.ScriptName, "account": accountName, "status": w.Dimensions.Status, "quantile": "P50"}).Set(float64(w.Quantiles.WallTimeP50))
+			workerWallTime.With(prometheus.Labels{"script_name": w.Dimensions.ScriptName, "account": accountName, "status": w.Dimensions.Status, "quantile": "P75"}).Set(float64(w.Quantiles.WallTimeP75))
+			workerWallTime.With(prometheus.Labels{"script_name": w.Dimensions.ScriptName, "account": accountName, "status": w.Dimensions.Status, "quantile": "P99"}).Set(float64(w.Quantiles.WallTimeP99))
+			workerWallTime.With(prometheus.Labels{"script_name": w.Dimensions.ScriptName, "account": accountName, "status": w.Dimensions.Status, "quantile": "P999"}).Set(float64(w.Quantiles.WallTimeP999))
 		}
 	}
 }

@@ -122,6 +122,10 @@ type accountResp struct {
 			DurationP75  float32 `json:"durationP75"`
 			DurationP99  float32 `json:"durationP99"`
 			DurationP999 float32 `json:"durationP999"`
+			WallTimeP50  float32 `json:"wallTimeP50"`
+			WallTimeP75  float32 `json:"wallTimeP75"`
+			WallTimeP99  float32 `json:"wallTimeP99"`
+			WallTimeP999 float32 `json:"wallTimeP999"`
 		} `json:"quantiles"`
 	} `json:"workersInvocationsAdaptive"`
 }
@@ -737,6 +741,10 @@ func fetchWorkerTotals(accountID string) (*cloudflareResponseAccts, error) {
 						durationP75
 						durationP99
 						durationP999
+						wallTimeP50
+						wallTimeP75
+						wallTimeP99
+						wallTimeP999
 					}
 				}
 			}
