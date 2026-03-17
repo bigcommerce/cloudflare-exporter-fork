@@ -7,6 +7,7 @@ import (
 
 	cf "github.com/cloudflare/cloudflare-go/v4"
 	cfaccounts "github.com/cloudflare/cloudflare-go/v4/accounts"
+	cfkv "github.com/cloudflare/cloudflare-go/v4/kv"
 	cfload_balancers "github.com/cloudflare/cloudflare-go/v4/load_balancers"
 	cfpagination "github.com/cloudflare/cloudflare-go/v4/packages/pagination"
 	cfrulesets "github.com/cloudflare/cloudflare-go/v4/rulesets"
@@ -297,6 +298,30 @@ type lbResp struct {
 	} `json:"loadBalancingRequestsAdaptive"`
 
 	ZoneTag string `json:"zoneTag"`
+}
+
+type cloudflareResponseKV struct {
+	Viewer struct {
+		Accounts []kvAccountResp `json:"accounts"`
+	} `json:"viewer"`
+}
+
+type kvAccountResp struct {
+	KvOperationsAdaptiveGroups []struct {
+		Dimensions struct {
+			NamespaceID string `json:"namespaceId"`
+			ActionType  string `json:"actionType"`
+		} `json:"dimensions"`
+		Sum struct {
+			Requests uint64 `json:"requests"`
+		} `json:"sum"`
+		Quantiles struct {
+			LatencyMsP50  float32 `json:"latencyMsP50"`
+			LatencyMsP75  float32 `json:"latencyMsP75"`
+			LatencyMsP99  float32 `json:"latencyMsP99"`
+			LatencyMsP999 float32 `json:"latencyMsP999"`
+		} `json:"quantiles"`
+	} `json:"kvOperationsAdaptiveGroups"`
 }
 
 type cloudflareResponseDNSFirewall struct {
@@ -1083,6 +1108,80 @@ func filterNonFreePlanZones(zones []cfzones.Zone) (filteredZones []cfzones.Zone)
 		}
 	}
 	return
+}
+
+func fetchKVNamespaces(accountID string) (map[string]string, error) {
+	namespaceMap := make(map[string]string)
+	ctx, cancel := context.WithTimeout(context.Background(), cftimeout)
+	defer cancel()
+	page := cfclient.KV.Namespaces.ListAutoPaging(ctx, cfkv.NamespaceListParams{
+		AccountID: cf.F(accountID),
+	})
+	if page.Err() != nil {
+		return nil, page.Err()
+	}
+
+	seenIDs := make(map[string]struct{})
+	for page.Next() {
+		if page.Err() != nil {
+			log.Errorf("error during paging KV namespaces: %v", page.Err())
+			break
+		}
+		ns := page.Current()
+		if _, exists := seenIDs[ns.ID]; exists {
+			log.Errorf("fetchKVNamespaces: duplicate namespace ID detected (%s), breaking loop", ns.ID)
+			break
+		}
+		seenIDs[ns.ID] = struct{}{}
+		namespaceMap[ns.ID] = ns.Title
+	}
+
+	return namespaceMap, nil
+}
+
+func fetchKVOperations(accountID string) (*cloudflareResponseKV, error) {
+	request := graphql.NewRequest(`
+	query ($accountID: String!, $mintime: Time!, $maxtime: Time!, $limit: Int!) {
+		viewer {
+			accounts(filter: {accountTag: $accountID}) {
+				kvOperationsAdaptiveGroups(limit: $limit, filter: {datetime_geq: $mintime, datetime_lt: $maxtime}) {
+					dimensions {
+						namespaceId
+						actionType
+					}
+					sum {
+						requests
+					}
+					quantiles {
+						latencyMsP50
+						latencyMsP75
+						latencyMsP99
+						latencyMsP999
+					}
+				}
+			}
+		}
+	}`)
+
+	now, now1mAgo := GetTimeRange()
+	request.Var("limit", gqlQueryLimit)
+	request.Var("maxtime", now)
+	request.Var("mintime", now1mAgo)
+	request.Var("accountID", accountID)
+
+	gql.Mu.RLock()
+	defer gql.Mu.RUnlock()
+
+	ctx, cancel := context.WithTimeout(context.Background(), cftimeout)
+	defer cancel()
+
+	var resp cloudflareResponseKV
+	if err := gql.Client.Run(ctx, request, &resp); err != nil {
+		log.Errorf("error fetching KV operations, err:%v", err)
+		return nil, err
+	}
+
+	return &resp, nil
 }
 
 func fetchDNSFirewallTotals(accountID string) (*cloudflareResponseDNSFirewall, error) {

@@ -64,6 +64,8 @@ const (
 	tunnelConnectorInfoMetricName                MetricName = "cloudflare_tunnel_connector_info"
 	tunnelConnectorActiveConnectionsMetricName   MetricName = "cloudflare_tunnel_connector_active_connections"
 	dnsFirewallQueryCountMetricName              MetricName = "cloudflare_dns_firewall_query_count"
+	kvRequestsMetricName                         MetricName = "cloudflare_kv_requests_count"
+	kvLatencyMetricName                          MetricName = "cloudflare_kv_latency"
 )
 
 type MetricsSet map[MetricName]struct{}
@@ -336,6 +338,16 @@ var (
 		Help: "Reports number of active connections for a Cloudflare Tunnel connector",
 	}, []string{"account", "tunnel_id", "client_id"})
 
+	kvRequests = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: kvRequestsMetricName.String(),
+		Help: "Number of KV operations by namespace and action type",
+	}, []string{"namespace_name", "action_type", "account"})
+
+	kvLatency = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: kvLatencyMetricName.String(),
+		Help: "KV operation latency quantiles (milliseconds)",
+	}, []string{"namespace_name", "action_type", "account", "quantile"})
+
 	dnsFirewallQueryCount = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 		Name: dnsFirewallQueryCountMetricName.String(),
 		Help: "DNS Firewall query count by query type and response code",
@@ -388,6 +400,8 @@ func buildAllMetricsSet() MetricsSet {
 	allMetricsSet.Add(tunnelConnectorInfoMetricName)
 	allMetricsSet.Add(tunnelConnectorActiveConnectionsMetricName)
 	allMetricsSet.Add(dnsFirewallQueryCountMetricName)
+	allMetricsSet.Add(kvRequestsMetricName)
+	allMetricsSet.Add(kvLatencyMetricName)
 	return allMetricsSet
 }
 
@@ -537,6 +551,12 @@ func mustRegisterMetrics(deniedMetrics MetricsSet) {
 	if !deniedMetrics.Has(dnsFirewallQueryCountMetricName) {
 		prometheus.MustRegister(dnsFirewallQueryCount)
 	}
+	if !deniedMetrics.Has(kvRequestsMetricName) {
+		prometheus.MustRegister(kvRequests)
+	}
+	if !deniedMetrics.Has(kvLatencyMetricName) {
+		prometheus.MustRegister(kvLatency)
+	}
 }
 
 func fetchLoadblancerPoolsHealth(account cfaccounts.Account, wg *sync.WaitGroup) {
@@ -603,6 +623,40 @@ func fetchWorkerAnalytics(account cfaccounts.Account, wg *sync.WaitGroup) {
 			workerWallTime.With(prometheus.Labels{"script_name": w.Dimensions.ScriptName, "account": accountName, "status": w.Dimensions.Status, "quantile": "P75"}).Set(float64(w.Quantiles.WallTimeP75))
 			workerWallTime.With(prometheus.Labels{"script_name": w.Dimensions.ScriptName, "account": accountName, "status": w.Dimensions.Status, "quantile": "P99"}).Set(float64(w.Quantiles.WallTimeP99))
 			workerWallTime.With(prometheus.Labels{"script_name": w.Dimensions.ScriptName, "account": accountName, "status": w.Dimensions.Status, "quantile": "P999"}).Set(float64(w.Quantiles.WallTimeP999))
+		}
+	}
+}
+
+func fetchKVAnalytics(account cfaccounts.Account, wg *sync.WaitGroup) {
+	wg.Add(1)
+	defer wg.Done()
+
+	namespaceMap, err := fetchKVNamespaces(account.ID)
+	if err != nil {
+		log.Error("failed to fetch KV namespaces for account ", account.ID, ": ", err)
+		return
+	}
+
+	r, err := fetchKVOperations(account.ID)
+	if err != nil {
+		log.Error("failed to fetch KV operations for account ", account.ID, ": ", err)
+		return
+	}
+
+	accountName := strings.ToLower(strings.ReplaceAll(account.Name, " ", "-"))
+
+	for _, a := range r.Viewer.Accounts {
+		for _, kv := range a.KvOperationsAdaptiveGroups {
+			namespaceName := namespaceMap[kv.Dimensions.NamespaceID]
+			if namespaceName == "" {
+				namespaceName = kv.Dimensions.NamespaceID
+			}
+
+			kvRequests.With(prometheus.Labels{"namespace_name": namespaceName, "action_type": kv.Dimensions.ActionType, "account": accountName}).Set(float64(kv.Sum.Requests))
+			kvLatency.With(prometheus.Labels{"namespace_name": namespaceName, "action_type": kv.Dimensions.ActionType, "account": accountName, "quantile": "P50"}).Set(float64(kv.Quantiles.LatencyMsP50))
+			kvLatency.With(prometheus.Labels{"namespace_name": namespaceName, "action_type": kv.Dimensions.ActionType, "account": accountName, "quantile": "P75"}).Set(float64(kv.Quantiles.LatencyMsP75))
+			kvLatency.With(prometheus.Labels{"namespace_name": namespaceName, "action_type": kv.Dimensions.ActionType, "account": accountName, "quantile": "P99"}).Set(float64(kv.Quantiles.LatencyMsP99))
+			kvLatency.With(prometheus.Labels{"namespace_name": namespaceName, "action_type": kv.Dimensions.ActionType, "account": accountName, "quantile": "P999"}).Set(float64(kv.Quantiles.LatencyMsP999))
 		}
 	}
 }
