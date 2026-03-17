@@ -736,14 +736,6 @@ func fetchQueueAnalytics(account cfaccounts.Account, wg *sync.WaitGroup) {
 	wg.Add(1)
 	defer wg.Done()
 
-	queueNames, err := fetchQueueNames(account.ID)
-	if err != nil {
-		log.Error("failed to fetch queue names for account ", account.ID, ": ", err)
-		return
-	}
-
-	log.Info("fetched queue names")
-
 	r, err := fetchQueueMetrics(account.ID)
 	if err != nil {
 		log.Error("failed to fetch queue metrics for account ", account.ID, ": ", err)
@@ -755,19 +747,11 @@ func fetchQueueAnalytics(account cfaccounts.Account, wg *sync.WaitGroup) {
 
 	for _, a := range r.Viewer.Accounts {
 		for _, b := range a.QueueBacklogAdaptiveGroups {
-			queueName := b.Dimensions.QueueID
-			if name, ok := queueNames[b.Dimensions.QueueID]; ok {
-				queueName = name
-			}
-			queueBacklogMessages.With(prometheus.Labels{"queue_name": queueName, "account": accountName}).Set(b.Avg.Messages)
-			queueBacklogBytes.With(prometheus.Labels{"queue_name": queueName, "account": accountName}).Set(b.Avg.Bytes)
+			queueBacklogMessages.With(prometheus.Labels{"queue_name": b.Dimensions.QueueID, "account": accountName}).Set(b.Avg.Messages)
+			queueBacklogBytes.With(prometheus.Labels{"queue_name": b.Dimensions.QueueID, "account": accountName}).Set(b.Avg.Bytes)
 		}
 		for _, c := range a.QueueConsumerMetricsAdaptiveGroups {
-			queueName := c.Dimensions.QueueID
-			if name, ok := queueNames[c.Dimensions.QueueID]; ok {
-				queueName = name
-			}
-			queueConsumerConcurrency.With(prometheus.Labels{"queue_name": queueName, "account": accountName}).Set(c.Avg.Concurrency)
+			queueConsumerConcurrency.With(prometheus.Labels{"queue_name": c.Dimensions.QueueID, "account": accountName}).Set(c.Avg.Concurrency)
 		}
 	}
 }

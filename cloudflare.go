@@ -9,7 +9,7 @@ import (
 	cfaccounts "github.com/cloudflare/cloudflare-go/v4/accounts"
 	cfload_balancers "github.com/cloudflare/cloudflare-go/v4/load_balancers"
 	cfpagination "github.com/cloudflare/cloudflare-go/v4/packages/pagination"
-	cfqueues "github.com/cloudflare/cloudflare-go/v4/queues"
+
 	cfrulesets "github.com/cloudflare/cloudflare-go/v4/rulesets"
 	cfzero_trust "github.com/cloudflare/cloudflare-go/v4/zero_trust"
 	cfzones "github.com/cloudflare/cloudflare-go/v4/zones"
@@ -1248,36 +1248,6 @@ func fetchWorkerSubrequests(accountID string) (*cloudflareResponseSubrequests, e
 	}
 
 	return &resp, nil
-}
-
-func fetchQueueNames(accountID string) (map[string]string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), cftimeout)
-	defer cancel()
-	page := cfclient.Queues.ListAutoPaging(ctx,
-		cfqueues.QueueListParams{
-			AccountID: cf.F(accountID),
-		})
-	if page.Err() != nil {
-		return nil, page.Err()
-	}
-
-	queueNames := make(map[string]string)
-	seenIDs := make(map[string]struct{})
-	for page.Next() {
-		if page.Err() != nil {
-			log.Errorf("error during paging queues: %v", page.Err())
-			break
-		}
-		q := page.Current()
-		if _, exists := seenIDs[q.QueueID]; exists {
-			log.Errorf("fetchQueueNames: duplicate queue ID detected (%s), breaking loop", q.QueueID)
-			break
-		}
-		seenIDs[q.QueueID] = struct{}{}
-		queueNames[q.QueueID] = q.QueueName
-	}
-
-	return queueNames, nil
 }
 
 func fetchQueueMetrics(accountID string) (*cloudflareResponseQueues, error) {

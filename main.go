@@ -196,7 +196,7 @@ func runExporter() {
 	h := health.New(health.Health{})
 	http.HandleFunc("/health", h.Handler)
 
-	log.Info("(live change) Beginning to serve metrics on ", viper.GetString("listen"), cfgMetricsPath)
+	log.Info("(live change v1) Beginning to serve metrics on ", viper.GetString("listen"), cfgMetricsPath)
 
 	server := &http.Server{
 		Addr:              viper.GetString("listen"),
