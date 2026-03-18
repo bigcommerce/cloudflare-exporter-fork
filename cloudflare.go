@@ -299,6 +299,30 @@ type lbResp struct {
 	ZoneTag string `json:"zoneTag"`
 }
 
+type cloudflareResponseKV struct {
+	Viewer struct {
+		Accounts []kvAccountResp `json:"accounts"`
+	} `json:"viewer"`
+}
+
+type kvAccountResp struct {
+	KvOperationsAdaptiveGroups []struct {
+		Dimensions struct {
+			NamespaceID string `json:"namespaceId"`
+			ActionType  string `json:"actionType"`
+		} `json:"dimensions"`
+		Sum struct {
+			Requests uint64 `json:"requests"`
+		} `json:"sum"`
+		Quantiles struct {
+			LatencyMsP50  float32 `json:"latencyMsP50"`
+			LatencyMsP75  float32 `json:"latencyMsP75"`
+			LatencyMsP99  float32 `json:"latencyMsP99"`
+			LatencyMsP999 float32 `json:"latencyMsP999"`
+		} `json:"quantiles"`
+	} `json:"kvOperationsAdaptiveGroups"`
+}
+
 type cloudflareResponseDNSFirewall struct {
 	Viewer struct {
 		Accounts []dnsFirewallAccountResp `json:"accounts"`
@@ -1083,6 +1107,51 @@ func filterNonFreePlanZones(zones []cfzones.Zone) (filteredZones []cfzones.Zone)
 		}
 	}
 	return
+}
+
+func fetchKVOperations(accountID string) (*cloudflareResponseKV, error) {
+	request := graphql.NewRequest(`
+	query ($accountID: String!, $mintime: Time!, $maxtime: Time!, $limit: Int!) {
+		viewer {
+			accounts(filter: {accountTag: $accountID}) {
+				kvOperationsAdaptiveGroups(limit: $limit, filter: {datetime_geq: $mintime, datetime_lt: $maxtime}) {
+					dimensions {
+						namespaceId
+						actionType
+					}
+					sum {
+						requests
+					}
+					quantiles {
+						latencyMsP50
+						latencyMsP75
+						latencyMsP99
+						latencyMsP999
+					}
+				}
+			}
+		}
+	}`)
+
+	now, now1mAgo := GetTimeRange()
+	request.Var("limit", gqlQueryLimit)
+	request.Var("maxtime", now)
+	request.Var("mintime", now1mAgo)
+	request.Var("accountID", accountID)
+
+	gql.Mu.RLock()
+	defer gql.Mu.RUnlock()
+
+	ctx, cancel := context.WithTimeout(context.Background(), cftimeout)
+	defer cancel()
+
+	var resp cloudflareResponseKV
+	if err := gql.Client.Run(ctx, request, &resp); err != nil {
+		log.Errorf("error fetching KV operations, err:%v", err)
+		return nil, err
+	}
+
+	return &resp, nil
 }
 
 func fetchDNSFirewallTotals(accountID string) (*cloudflareResponseDNSFirewall, error) {

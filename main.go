@@ -25,6 +25,10 @@ var (
 	cftimeout time.Duration
 	gql       *GraphQL
 	log       = logrus.New()
+
+	// kvTrackedNamespaces is the set of KV namespace IDs that get their own
+	// namespace_id label. All other namespaces are aggregated under "other".
+	kvTrackedNamespaces map[string]struct{}
 )
 
 // var (
@@ -110,6 +114,7 @@ func fetchMetrics(deniedMetricsSet MetricsSet) {
 
 	for _, a := range accounts {
 		go fetchWorkerAnalytics(a, &wg)
+		go fetchKVAnalytics(a, &wg, deniedMetricsSet)
 		go fetchLogpushAnalyticsForAccount(a, &wg)
 		go fetchR2StorageForAccount(a, &wg)
 		go fetchLoadblancerPoolsHealth(a, &wg)
@@ -172,6 +177,18 @@ func runExporter() {
 	}
 	log.Debugf("Metrics set: %v", metricsSet)
 	mustRegisterMetrics(metricsSet)
+
+	// Build tracked KV namespace set from config.
+	kvTrackedNamespaces = make(map[string]struct{})
+	if ids := viper.GetString("kv_namespace_ids"); ids != "" {
+		for _, id := range strings.Split(ids, ",") {
+			id = strings.TrimSpace(id)
+			if id != "" {
+				kvTrackedNamespaces[id] = struct{}{}
+			}
+		}
+	}
+	log.Infof("Tracking %d KV namespace IDs", len(kvTrackedNamespaces))
 
 	scrapeInterval := time.Duration(viper.GetInt("scrape_interval")) * time.Second
 	log.Info("Scrape interval set to ", scrapeInterval)
@@ -255,6 +272,10 @@ func main() {
 	flags.Duration("cf_timeout", 10*time.Second, "cloudflare request timeout, default 10 seconds")
 	viper.BindEnv("cf_timeout")
 	viper.SetDefault("cf_timeout", 10*time.Second)
+
+	flags.String("kv_namespace_ids", "", "KV namespace IDs to track individually, comma delimited. Unlisted namespaces are aggregated as 'other'")
+	viper.BindEnv("kv_namespace_ids")
+	viper.SetDefault("kv_namespace_ids", "")
 
 	flags.String("metrics_denylist", "", "metrics to not expose, comma delimited list")
 	viper.BindEnv("metrics_denylist")
