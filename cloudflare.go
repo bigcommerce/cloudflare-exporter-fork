@@ -7,7 +7,6 @@ import (
 
 	cf "github.com/cloudflare/cloudflare-go/v4"
 	cfaccounts "github.com/cloudflare/cloudflare-go/v4/accounts"
-	cfkv "github.com/cloudflare/cloudflare-go/v4/kv"
 	cfload_balancers "github.com/cloudflare/cloudflare-go/v4/load_balancers"
 	cfpagination "github.com/cloudflare/cloudflare-go/v4/packages/pagination"
 	cfrulesets "github.com/cloudflare/cloudflare-go/v4/rulesets"
@@ -1108,35 +1107,6 @@ func filterNonFreePlanZones(zones []cfzones.Zone) (filteredZones []cfzones.Zone)
 		}
 	}
 	return
-}
-
-func fetchKVNamespaces(accountID string) (map[string]string, error) {
-	namespaceMap := make(map[string]string)
-	ctx, cancel := context.WithTimeout(context.Background(), cftimeout)
-	defer cancel()
-	page := cfclient.KV.Namespaces.ListAutoPaging(ctx, cfkv.NamespaceListParams{
-		AccountID: cf.F(accountID),
-	})
-	if page.Err() != nil {
-		return nil, page.Err()
-	}
-
-	seenIDs := make(map[string]struct{})
-	for page.Next() {
-		if page.Err() != nil {
-			log.Errorf("error during paging KV namespaces: %v", page.Err())
-			break
-		}
-		ns := page.Current()
-		if _, exists := seenIDs[ns.ID]; exists {
-			log.Errorf("fetchKVNamespaces: duplicate namespace ID detected (%s), breaking loop", ns.ID)
-			break
-		}
-		seenIDs[ns.ID] = struct{}{}
-		namespaceMap[ns.ID] = ns.Title
-	}
-
-	return namespaceMap, nil
 }
 
 func fetchKVOperations(accountID string) (*cloudflareResponseKV, error) {
