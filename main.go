@@ -7,6 +7,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/nelkinda/health-go"
@@ -25,6 +26,10 @@ var (
 	cftimeout time.Duration
 	gql       *GraphQL
 	log       = logrus.New()
+
+	// kvNamespaceCache stores accountID -> namespaceID -> name.
+	// Atomically replaced by refreshKVNamespaceCache, read by getKVNamespaceMap.
+	kvNamespaceCache atomic.Pointer[map[string]map[string]string]
 )
 
 // var (
@@ -151,6 +156,30 @@ func fetchMetrics(deniedMetricsSet MetricsSet) {
 	wg.Wait()
 }
 
+func refreshKVNamespaceCache() {
+	accounts := fetchAccounts()
+	newCache := make(map[string]map[string]string, len(accounts))
+	for _, a := range accounts {
+		nsMap, err := fetchKVNamespaces(a.ID)
+		if err != nil {
+			log.Warnf("failed to refresh KV namespace cache for account %s: %v", a.ID, err)
+			continue
+		}
+		newCache[a.ID] = nsMap
+	}
+
+	kvNamespaceCache.Store(&newCache)
+	log.Info("KV namespace cache refreshed")
+}
+
+func getKVNamespaceMap(accountID string) map[string]string {
+	cache := kvNamespaceCache.Load()
+	if cache == nil {
+		return nil
+	}
+	return (*cache)[accountID]
+}
+
 func runExporter() {
 	cfgMetricsPath := viper.GetString("metrics_path")
 
@@ -173,6 +202,16 @@ func runExporter() {
 	}
 	log.Debugf("Metrics set: %v", metricsSet)
 	mustRegisterMetrics(metricsSet)
+
+	// Populate KV namespace cache at boot, then refresh on interval.
+	refreshKVNamespaceCache()
+	kvCacheInterval := viper.GetDuration("kv_cache_interval")
+	log.Info("KV namespace cache refresh interval set to ", kvCacheInterval)
+	go func() {
+		for range time.NewTicker(kvCacheInterval).C {
+			refreshKVNamespaceCache()
+		}
+	}()
 
 	scrapeInterval := time.Duration(viper.GetInt("scrape_interval")) * time.Second
 	log.Info("Scrape interval set to ", scrapeInterval)
@@ -256,6 +295,10 @@ func main() {
 	flags.Duration("cf_timeout", 10*time.Second, "cloudflare request timeout, default 10 seconds")
 	viper.BindEnv("cf_timeout")
 	viper.SetDefault("cf_timeout", 10*time.Second)
+
+	flags.Duration("kv_cache_interval", 5*time.Minute, "KV namespace cache refresh interval, default 5 minutes")
+	viper.BindEnv("kv_cache_interval")
+	viper.SetDefault("kv_cache_interval", 5*time.Minute)
 
 	flags.String("metrics_denylist", "", "metrics to not expose, comma delimited list")
 	viper.BindEnv("metrics_denylist")

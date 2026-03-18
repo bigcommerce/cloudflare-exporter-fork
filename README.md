@@ -67,6 +67,7 @@ The exporter can be configured using env variables or command flags.
 | `SCRAPE_DELAY` | scrape delay in seconds, default `300` |
 | `SCRAPE_INTERVAL` | scrape interval in seconds (will query cloudflare every SCRAPE_INTERVAL seconds), default `60` |
 | `METRICS_DENYLIST` | (Optional) cloudflare-exporter metrics to not export, comma delimited list of cloudflare-exporter metrics. If not set, all metrics are exported |
+| `KV_CACHE_INTERVAL` | (Optional) KV namespace cache refresh interval, default `5m` |
 | `ENABLE_PPROF` | (Optional) enable pprof profiling endpoints at `/debug/pprof/`. Accepts `true` or `false`, default `false`. **Warning**: Only enable in development/debugging environments |
 | `ZONE_<NAME>` |  `DEPRECATED since 0.0.5` (optional) Zone ID. Add zones you want to scrape by adding env vars in this format. You can find the zone ids in Cloudflare dashboards. |
 | `LOG_LEVEL` | Set loglevel. Options are error, warn, info, debug. default `error` |
@@ -85,6 +86,7 @@ Corresponding flags:
   -metrics_path="/metrics": path for metrics, default /metrics
   -scrape_delay=300: scrape delay in seconds, defaults to 300
   -scrape_interval=60: scrape interval in seconds, defaults to 60
+  -kv_cache_interval="5m": KV namespace cache refresh interval, default 5 minutes
   -metrics_denylist="": cloudflare-exporter metrics to not export, comma delimited list
   -enable_pprof=false: enable pprof profiling endpoints at /debug/pprof/
   -log_level="error": log level(error,warn,info,debug)

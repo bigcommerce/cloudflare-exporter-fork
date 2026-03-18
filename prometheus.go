@@ -631,11 +631,7 @@ func fetchKVAnalytics(account cfaccounts.Account, wg *sync.WaitGroup, deniedMetr
 	wg.Add(1)
 	defer wg.Done()
 
-	namespaceMap, err := fetchKVNamespaces(account.ID)
-	if err != nil {
-		log.Error("failed to fetch KV namespaces for account ", account.ID, ": ", err)
-		return
-	}
+	namespaceMap := getKVNamespaceMap(account.ID)
 
 	r, err := fetchKVOperations(account.ID)
 	if err != nil {
