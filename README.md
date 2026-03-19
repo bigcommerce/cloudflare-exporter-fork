@@ -133,6 +133,13 @@ Note: `ZONE_<name>` configuration is not supported as flag.
 # HELP cloudflare_kv_latency KV operation latency quantiles (milliseconds)
 # HELP cloudflare_worker_subrequests_count Number of subrequests by script name
 # HELP cloudflare_worker_subrequest_time Subrequest response time quantiles (microseconds)
+# HELP cloudflare_queue_backlog_messages Average number of messages in queue backlog
+# HELP cloudflare_queue_backlog_bytes Average backlog size in bytes
+# HELP cloudflare_queue_consumer_concurrency Average number of concurrent queue consumers
+# HELP cloudflare_queue_operations_count Number of queue message operations
+# HELP cloudflare_queue_operations_bytes Total bytes processed by queue message operations
+# HELP cloudflare_queue_operations_lag_time Average lag time between write and read/delete (milliseconds)
+# HELP cloudflare_queue_operations_retry_count Average retry count for queue message operations
 ```
 
 ## Helm chart repository

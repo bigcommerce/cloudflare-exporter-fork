@@ -116,6 +116,7 @@ func fetchMetrics(deniedMetricsSet MetricsSet) {
 		go fetchWorkerAnalytics(a, &wg)
 		go fetchKVAnalytics(a, &wg, deniedMetricsSet)
 		go fetchWorkerSubrequestAnalytics(a, &wg, deniedMetricsSet)
+		go fetchQueueAnalytics(a, &wg, deniedMetricsSet)
 		go fetchLogpushAnalyticsForAccount(a, &wg)
 		go fetchR2StorageForAccount(a, &wg)
 		go fetchLoadblancerPoolsHealth(a, &wg)
