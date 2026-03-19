@@ -115,6 +115,7 @@ func fetchMetrics(deniedMetricsSet MetricsSet) {
 	for _, a := range accounts {
 		go fetchWorkerAnalytics(a, &wg)
 		go fetchKVAnalytics(a, &wg, deniedMetricsSet)
+		go fetchWorkerSubrequestAnalytics(a, &wg, deniedMetricsSet)
 		go fetchLogpushAnalyticsForAccount(a, &wg)
 		go fetchR2StorageForAccount(a, &wg)
 		go fetchLoadblancerPoolsHealth(a, &wg)

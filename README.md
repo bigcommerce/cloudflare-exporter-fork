@@ -131,6 +131,8 @@ Note: `ZONE_<name>` configuration is not supported as flag.
 # HELP cloudflare_r2_storage_total_bytes Total storage used by R2
 # HELP cloudflare_kv_requests_count Number of KV operations by namespace and action type
 # HELP cloudflare_kv_latency KV operation latency quantiles (milliseconds)
+# HELP cloudflare_worker_subrequests_count Number of subrequests by script name
+# HELP cloudflare_worker_subrequest_time Subrequest response time quantiles (microseconds)
 ```
 
 ## Helm chart repository

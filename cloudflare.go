@@ -323,6 +323,29 @@ type kvAccountResp struct {
 	} `json:"kvOperationsAdaptiveGroups"`
 }
 
+type cloudflareResponseSubrequests struct {
+	Viewer struct {
+		Accounts []subrequestsAccountResp `json:"accounts"`
+	} `json:"viewer"`
+}
+
+type subrequestsAccountResp struct {
+	WorkersSubrequestsAdaptiveGroups []struct {
+		Dimensions struct {
+			ScriptName string `json:"scriptName"`
+		} `json:"dimensions"`
+		Sum struct {
+			Subrequests uint64 `json:"subrequests"`
+		} `json:"sum"`
+		Quantiles struct {
+			TimeToResponseUsP50  float32 `json:"timeToResponseUsP50"`
+			TimeToResponseUsP75  float32 `json:"timeToResponseUsP75"`
+			TimeToResponseUsP99  float32 `json:"timeToResponseUsP99"`
+			TimeToResponseUsP999 float32 `json:"timeToResponseUsP999"`
+		} `json:"quantiles"`
+	} `json:"workersSubrequestsAdaptiveGroups"`
+}
+
 type cloudflareResponseDNSFirewall struct {
 	Viewer struct {
 		Accounts []dnsFirewallAccountResp `json:"accounts"`
@@ -1148,6 +1171,50 @@ func fetchKVOperations(accountID string) (*cloudflareResponseKV, error) {
 	var resp cloudflareResponseKV
 	if err := gql.Client.Run(ctx, request, &resp); err != nil {
 		log.Errorf("error fetching KV operations, err:%v", err)
+		return nil, err
+	}
+
+	return &resp, nil
+}
+
+func fetchWorkerSubrequests(accountID string) (*cloudflareResponseSubrequests, error) {
+	request := graphql.NewRequest(`
+	query ($accountID: String!, $mintime: Time!, $maxtime: Time!, $limit: Int!) {
+		viewer {
+			accounts(filter: {accountTag: $accountID}) {
+				workersSubrequestsAdaptiveGroups(limit: $limit, filter: {datetime_geq: $mintime, datetime_lt: $maxtime}) {
+					dimensions {
+						scriptName
+					}
+					sum {
+						subrequests
+					}
+					quantiles {
+						timeToResponseUsP50
+						timeToResponseUsP75
+						timeToResponseUsP99
+						timeToResponseUsP999
+					}
+				}
+			}
+		}
+	}`)
+
+	now, now1mAgo := GetTimeRange()
+	request.Var("limit", gqlQueryLimit)
+	request.Var("maxtime", now)
+	request.Var("mintime", now1mAgo)
+	request.Var("accountID", accountID)
+
+	gql.Mu.RLock()
+	defer gql.Mu.RUnlock()
+
+	ctx, cancel := context.WithTimeout(context.Background(), cftimeout)
+	defer cancel()
+
+	var resp cloudflareResponseSubrequests
+	if err := gql.Client.Run(ctx, request, &resp); err != nil {
+		log.Errorf("error fetching worker subrequests, err:%v", err)
 		return nil, err
 	}
 
