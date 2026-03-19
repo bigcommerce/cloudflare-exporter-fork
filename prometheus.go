@@ -66,6 +66,8 @@ const (
 	dnsFirewallQueryCountMetricName              MetricName = "cloudflare_dns_firewall_query_count"
 	kvRequestsMetricName                         MetricName = "cloudflare_kv_requests_count"
 	kvLatencyMetricName                          MetricName = "cloudflare_kv_latency"
+	workerSubrequestsCountMetricName             MetricName = "cloudflare_worker_subrequests_count"
+	workerSubrequestTimeMetricName               MetricName = "cloudflare_worker_subrequest_time"
 )
 
 type MetricsSet map[MetricName]struct{}
@@ -348,6 +350,16 @@ var (
 		Help: "KV operation latency quantiles (milliseconds)",
 	}, []string{"namespace_id", "action_type", "account", "quantile"})
 
+	workerSubrequestsCount = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: workerSubrequestsCountMetricName.String(),
+		Help: "Number of subrequests by script name",
+	}, []string{"script_name", "account"})
+
+	workerSubrequestTime = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: workerSubrequestTimeMetricName.String(),
+		Help: "Subrequest response time quantiles (microseconds)",
+	}, []string{"script_name", "account", "quantile"})
+
 	dnsFirewallQueryCount = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 		Name: dnsFirewallQueryCountMetricName.String(),
 		Help: "DNS Firewall query count by query type and response code",
@@ -402,6 +414,8 @@ func buildAllMetricsSet() MetricsSet {
 	allMetricsSet.Add(dnsFirewallQueryCountMetricName)
 	allMetricsSet.Add(kvRequestsMetricName)
 	allMetricsSet.Add(kvLatencyMetricName)
+	allMetricsSet.Add(workerSubrequestsCountMetricName)
+	allMetricsSet.Add(workerSubrequestTimeMetricName)
 	return allMetricsSet
 }
 
@@ -557,6 +571,12 @@ func mustRegisterMetrics(deniedMetrics MetricsSet) {
 	if !deniedMetrics.Has(kvLatencyMetricName) {
 		prometheus.MustRegister(kvLatency)
 	}
+	if !deniedMetrics.Has(workerSubrequestsCountMetricName) {
+		prometheus.MustRegister(workerSubrequestsCount)
+	}
+	if !deniedMetrics.Has(workerSubrequestTimeMetricName) {
+		prometheus.MustRegister(workerSubrequestTime)
+	}
 }
 
 func fetchLoadblancerPoolsHealth(account cfaccounts.Account, wg *sync.WaitGroup) {
@@ -654,6 +674,33 @@ func fetchKVAnalytics(account cfaccounts.Account, wg *sync.WaitGroup, deniedMetr
 				kvLatency.With(prometheus.Labels{"namespace_id": nsID, "action_type": kv.Dimensions.ActionType, "account": accountName, "quantile": "P75"}).Set(float64(kv.Quantiles.LatencyMsP75))
 				kvLatency.With(prometheus.Labels{"namespace_id": nsID, "action_type": kv.Dimensions.ActionType, "account": accountName, "quantile": "P99"}).Set(float64(kv.Quantiles.LatencyMsP99))
 				kvLatency.With(prometheus.Labels{"namespace_id": nsID, "action_type": kv.Dimensions.ActionType, "account": accountName, "quantile": "P999"}).Set(float64(kv.Quantiles.LatencyMsP999))
+			}
+		}
+	}
+}
+
+func fetchWorkerSubrequestAnalytics(account cfaccounts.Account, wg *sync.WaitGroup, deniedMetricsSet MetricsSet) {
+	wg.Add(1)
+	defer wg.Done()
+
+	r, err := fetchWorkerSubrequests(account.ID)
+	if err != nil {
+		log.Error("failed to fetch worker subrequests for account ", account.ID, ": ", err)
+		return
+	}
+
+	accountName := strings.ToLower(strings.ReplaceAll(account.Name, " ", "-"))
+
+	for _, a := range r.Viewer.Accounts {
+		for _, sr := range a.WorkersSubrequestsAdaptiveGroups {
+			if !deniedMetricsSet.Has(workerSubrequestsCountMetricName) {
+				workerSubrequestsCount.With(prometheus.Labels{"script_name": sr.Dimensions.ScriptName, "account": accountName}).Add(float64(sr.Sum.Subrequests))
+			}
+			if !deniedMetricsSet.Has(workerSubrequestTimeMetricName) {
+				workerSubrequestTime.With(prometheus.Labels{"script_name": sr.Dimensions.ScriptName, "account": accountName, "quantile": "P50"}).Set(float64(sr.Quantiles.TimeToResponseUsP50))
+				workerSubrequestTime.With(prometheus.Labels{"script_name": sr.Dimensions.ScriptName, "account": accountName, "quantile": "P75"}).Set(float64(sr.Quantiles.TimeToResponseUsP75))
+				workerSubrequestTime.With(prometheus.Labels{"script_name": sr.Dimensions.ScriptName, "account": accountName, "quantile": "P99"}).Set(float64(sr.Quantiles.TimeToResponseUsP99))
+				workerSubrequestTime.With(prometheus.Labels{"script_name": sr.Dimensions.ScriptName, "account": accountName, "quantile": "P999"}).Set(float64(sr.Quantiles.TimeToResponseUsP999))
 			}
 		}
 	}
