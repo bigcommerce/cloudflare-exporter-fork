@@ -9,6 +9,7 @@ import (
 	cfaccounts "github.com/cloudflare/cloudflare-go/v4/accounts"
 	cfload_balancers "github.com/cloudflare/cloudflare-go/v4/load_balancers"
 	cfpagination "github.com/cloudflare/cloudflare-go/v4/packages/pagination"
+	cfqueues "github.com/cloudflare/cloudflare-go/v4/queues"
 	cfrulesets "github.com/cloudflare/cloudflare-go/v4/rulesets"
 	cfzero_trust "github.com/cloudflare/cloudflare-go/v4/zero_trust"
 	cfzones "github.com/cloudflare/cloudflare-go/v4/zones"
@@ -344,6 +345,47 @@ type subrequestsAccountResp struct {
 			TimeToResponseUsP999 float32 `json:"timeToResponseUsP999"`
 		} `json:"quantiles"`
 	} `json:"workersSubrequestsAdaptiveGroups"`
+}
+
+type cloudflareResponseQueues struct {
+	Viewer struct {
+		Accounts []queueAccountResp `json:"accounts"`
+	} `json:"viewer"`
+}
+
+type queueAccountResp struct {
+	QueueBacklogAdaptiveGroups []struct {
+		Dimensions struct {
+			QueueID string `json:"queueId"`
+		} `json:"dimensions"`
+		Avg struct {
+			Messages float64 `json:"messages"`
+			Bytes    float64 `json:"bytes"`
+		} `json:"avg"`
+	} `json:"queueBacklogAdaptiveGroups"`
+	QueueConsumerMetricsAdaptiveGroups []struct {
+		Dimensions struct {
+			QueueID string `json:"queueId"`
+		} `json:"dimensions"`
+		Avg struct {
+			Concurrency float64 `json:"concurrency"`
+		} `json:"avg"`
+	} `json:"queueConsumerMetricsAdaptiveGroups"`
+	QueueMessageOperationsAdaptiveGroups []struct {
+		Dimensions struct {
+			QueueID    string `json:"queueId"`
+			ActionType string `json:"actionType"`
+			Outcome    string `json:"outcome"`
+		} `json:"dimensions"`
+		Sum struct {
+			BillableOperations uint64 `json:"billableOperations"`
+			Bytes              uint64 `json:"bytes"`
+		} `json:"sum"`
+		Avg struct {
+			LagTime    float64 `json:"lagTime"`
+			RetryCount float64 `json:"retryCount"`
+		} `json:"avg"`
+	} `json:"queueMessageOperationsAdaptiveGroups"`
 }
 
 type cloudflareResponseDNSFirewall struct {
@@ -1215,6 +1257,98 @@ func fetchWorkerSubrequests(accountID string) (*cloudflareResponseSubrequests, e
 	var resp cloudflareResponseSubrequests
 	if err := gql.Client.Run(ctx, request, &resp); err != nil {
 		log.Errorf("error fetching worker subrequests, err:%v", err)
+		return nil, err
+	}
+
+	return &resp, nil
+}
+
+func fetchQueueNames(accountID string) (map[string]string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), cftimeout)
+	defer cancel()
+	page := cfclient.Queues.ListAutoPaging(ctx,
+		cfqueues.QueueListParams{
+			AccountID: cf.F(accountID),
+		})
+	if page.Err() != nil {
+		return nil, page.Err()
+	}
+
+	names := make(map[string]string)
+	seenIDs := make(map[string]struct{})
+	for page.Next() {
+		if page.Err() != nil {
+			log.Errorf("error during paging queues: %v", page.Err())
+			break
+		}
+		q := page.Current()
+		if _, exists := seenIDs[q.QueueID]; exists {
+			log.Errorf("fetchQueueNames: duplicate queue ID detected (%s), breaking loop", q.QueueID)
+			break
+		}
+		seenIDs[q.QueueID] = struct{}{}
+		names[q.QueueID] = q.QueueName
+	}
+
+	return names, nil
+}
+
+func fetchQueueMetrics(accountID string) (*cloudflareResponseQueues, error) {
+	request := graphql.NewRequest(`
+	query ($accountID: String!, $mintime: Time!, $maxtime: Time!, $limit: Int!) {
+		viewer {
+			accounts(filter: {accountTag: $accountID}) {
+				queueBacklogAdaptiveGroups(limit: $limit, filter: {datetime_geq: $mintime, datetime_lt: $maxtime}) {
+					dimensions {
+						queueId
+					}
+					avg {
+						messages
+						bytes
+					}
+				}
+				queueConsumerMetricsAdaptiveGroups(limit: $limit, filter: {datetime_geq: $mintime, datetime_lt: $maxtime}) {
+					dimensions {
+						queueId
+					}
+					avg {
+						concurrency
+					}
+				}
+				queueMessageOperationsAdaptiveGroups(limit: $limit, filter: {datetime_geq: $mintime, datetime_lt: $maxtime}) {
+					dimensions {
+						queueId
+						actionType
+						outcome
+					}
+					sum {
+						billableOperations
+						bytes
+					}
+					avg {
+						lagTime
+						retryCount
+					}
+				}
+			}
+		}
+	}`)
+
+	now, now1mAgo := GetTimeRange()
+	request.Var("limit", gqlQueryLimit)
+	request.Var("maxtime", now)
+	request.Var("mintime", now1mAgo)
+	request.Var("accountID", accountID)
+
+	gql.Mu.RLock()
+	defer gql.Mu.RUnlock()
+
+	ctx, cancel := context.WithTimeout(context.Background(), cftimeout)
+	defer cancel()
+
+	var resp cloudflareResponseQueues
+	if err := gql.Client.Run(ctx, request, &resp); err != nil {
+		log.Errorf("error fetching queue metrics, err:%v", err)
 		return nil, err
 	}
 

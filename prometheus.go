@@ -68,6 +68,13 @@ const (
 	kvLatencyMetricName                          MetricName = "cloudflare_kv_latency"
 	workerSubrequestsCountMetricName             MetricName = "cloudflare_worker_subrequests_count"
 	workerSubrequestTimeMetricName               MetricName = "cloudflare_worker_subrequest_time"
+	queueBacklogMessagesMetricName               MetricName = "cloudflare_queue_backlog_messages"
+	queueBacklogBytesMetricName                  MetricName = "cloudflare_queue_backlog_bytes"
+	queueConsumerConcurrencyMetricName           MetricName = "cloudflare_queue_consumer_concurrency"
+	queueOperationsMetricName                    MetricName = "cloudflare_queue_operations_count"
+	queueOperationBytesMetricName                MetricName = "cloudflare_queue_operations_bytes"
+	queueOperationLagTimeMetricName              MetricName = "cloudflare_queue_operations_lag_time"
+	queueOperationRetryCountMetricName           MetricName = "cloudflare_queue_operations_retry_count"
 )
 
 type MetricsSet map[MetricName]struct{}
@@ -360,6 +367,41 @@ var (
 		Help: "Subrequest response time quantiles (microseconds)",
 	}, []string{"script_name", "account", "quantile"})
 
+	queueBacklogMessages = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: queueBacklogMessagesMetricName.String(),
+		Help: "Average number of messages in queue backlog",
+	}, []string{"queue_name", "account"})
+
+	queueBacklogBytes = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: queueBacklogBytesMetricName.String(),
+		Help: "Average backlog size in bytes",
+	}, []string{"queue_name", "account"})
+
+	queueConsumerConcurrency = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: queueConsumerConcurrencyMetricName.String(),
+		Help: "Average number of concurrent queue consumers",
+	}, []string{"queue_name", "account"})
+
+	queueOperations = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: queueOperationsMetricName.String(),
+		Help: "Number of queue message operations",
+	}, []string{"queue_name", "account", "action_type", "outcome"})
+
+	queueOperationBytes = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: queueOperationBytesMetricName.String(),
+		Help: "Total bytes processed by queue message operations",
+	}, []string{"queue_name", "account", "action_type", "outcome"})
+
+	queueOperationLagTime = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: queueOperationLagTimeMetricName.String(),
+		Help: "Average lag time between write and read/delete (milliseconds)",
+	}, []string{"queue_name", "account", "action_type", "outcome"})
+
+	queueOperationRetryCount = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: queueOperationRetryCountMetricName.String(),
+		Help: "Average retry count for queue message operations",
+	}, []string{"queue_name", "account", "action_type", "outcome"})
+
 	dnsFirewallQueryCount = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 		Name: dnsFirewallQueryCountMetricName.String(),
 		Help: "DNS Firewall query count by query type and response code",
@@ -416,6 +458,13 @@ func buildAllMetricsSet() MetricsSet {
 	allMetricsSet.Add(kvLatencyMetricName)
 	allMetricsSet.Add(workerSubrequestsCountMetricName)
 	allMetricsSet.Add(workerSubrequestTimeMetricName)
+	allMetricsSet.Add(queueBacklogMessagesMetricName)
+	allMetricsSet.Add(queueBacklogBytesMetricName)
+	allMetricsSet.Add(queueConsumerConcurrencyMetricName)
+	allMetricsSet.Add(queueOperationsMetricName)
+	allMetricsSet.Add(queueOperationBytesMetricName)
+	allMetricsSet.Add(queueOperationLagTimeMetricName)
+	allMetricsSet.Add(queueOperationRetryCountMetricName)
 	return allMetricsSet
 }
 
@@ -577,6 +626,27 @@ func mustRegisterMetrics(deniedMetrics MetricsSet) {
 	if !deniedMetrics.Has(workerSubrequestTimeMetricName) {
 		prometheus.MustRegister(workerSubrequestTime)
 	}
+	if !deniedMetrics.Has(queueBacklogMessagesMetricName) {
+		prometheus.MustRegister(queueBacklogMessages)
+	}
+	if !deniedMetrics.Has(queueBacklogBytesMetricName) {
+		prometheus.MustRegister(queueBacklogBytes)
+	}
+	if !deniedMetrics.Has(queueConsumerConcurrencyMetricName) {
+		prometheus.MustRegister(queueConsumerConcurrency)
+	}
+	if !deniedMetrics.Has(queueOperationsMetricName) {
+		prometheus.MustRegister(queueOperations)
+	}
+	if !deniedMetrics.Has(queueOperationBytesMetricName) {
+		prometheus.MustRegister(queueOperationBytes)
+	}
+	if !deniedMetrics.Has(queueOperationLagTimeMetricName) {
+		prometheus.MustRegister(queueOperationLagTime)
+	}
+	if !deniedMetrics.Has(queueOperationRetryCountMetricName) {
+		prometheus.MustRegister(queueOperationRetryCount)
+	}
 }
 
 func fetchLoadblancerPoolsHealth(account cfaccounts.Account, wg *sync.WaitGroup) {
@@ -701,6 +771,68 @@ func fetchWorkerSubrequestAnalytics(account cfaccounts.Account, wg *sync.WaitGro
 				workerSubrequestTime.With(prometheus.Labels{"script_name": sr.Dimensions.ScriptName, "account": accountName, "quantile": "P75"}).Set(float64(sr.Quantiles.TimeToResponseUsP75))
 				workerSubrequestTime.With(prometheus.Labels{"script_name": sr.Dimensions.ScriptName, "account": accountName, "quantile": "P99"}).Set(float64(sr.Quantiles.TimeToResponseUsP99))
 				workerSubrequestTime.With(prometheus.Labels{"script_name": sr.Dimensions.ScriptName, "account": accountName, "quantile": "P999"}).Set(float64(sr.Quantiles.TimeToResponseUsP999))
+			}
+		}
+	}
+}
+
+func fetchQueueAnalytics(account cfaccounts.Account, wg *sync.WaitGroup, deniedMetricsSet MetricsSet) {
+	wg.Add(1)
+	defer wg.Done()
+
+	names, err := fetchQueueNames(account.ID)
+	if err != nil {
+		log.Error("failed to fetch queue names for account ", account.ID, ": ", err)
+		return
+	}
+
+	r, err := fetchQueueMetrics(account.ID)
+	if err != nil {
+		log.Error("failed to fetch queue metrics for account ", account.ID, ": ", err)
+		return
+	}
+
+	accountName := strings.ToLower(strings.ReplaceAll(account.Name, " ", "-"))
+
+	resolveQueueName := func(queueID string) string {
+		if name, ok := names[queueID]; ok {
+			return name
+		}
+		return queueID
+	}
+
+	for _, a := range r.Viewer.Accounts {
+		for _, b := range a.QueueBacklogAdaptiveGroups {
+			qName := resolveQueueName(b.Dimensions.QueueID)
+			if !deniedMetricsSet.Has(queueBacklogMessagesMetricName) {
+				queueBacklogMessages.With(prometheus.Labels{"queue_name": qName, "account": accountName}).Set(b.Avg.Messages)
+			}
+			if !deniedMetricsSet.Has(queueBacklogBytesMetricName) {
+				queueBacklogBytes.With(prometheus.Labels{"queue_name": qName, "account": accountName}).Set(b.Avg.Bytes)
+			}
+		}
+
+		for _, c := range a.QueueConsumerMetricsAdaptiveGroups {
+			qName := resolveQueueName(c.Dimensions.QueueID)
+			if !deniedMetricsSet.Has(queueConsumerConcurrencyMetricName) {
+				queueConsumerConcurrency.With(prometheus.Labels{"queue_name": qName, "account": accountName}).Set(c.Avg.Concurrency)
+			}
+		}
+
+		for _, op := range a.QueueMessageOperationsAdaptiveGroups {
+			qName := resolveQueueName(op.Dimensions.QueueID)
+			labels := prometheus.Labels{"queue_name": qName, "account": accountName, "action_type": op.Dimensions.ActionType, "outcome": op.Dimensions.Outcome}
+			if !deniedMetricsSet.Has(queueOperationsMetricName) {
+				queueOperations.With(labels).Set(float64(op.Sum.BillableOperations))
+			}
+			if !deniedMetricsSet.Has(queueOperationBytesMetricName) {
+				queueOperationBytes.With(labels).Set(float64(op.Sum.Bytes))
+			}
+			if !deniedMetricsSet.Has(queueOperationLagTimeMetricName) {
+				queueOperationLagTime.With(labels).Set(op.Avg.LagTime)
+			}
+			if !deniedMetricsSet.Has(queueOperationRetryCountMetricName) {
+				queueOperationRetryCount.With(labels).Set(op.Avg.RetryCount)
 			}
 		}
 	}
