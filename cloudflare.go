@@ -2,6 +2,10 @@ package main
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
 	"strings"
 	"time"
 
@@ -324,24 +328,16 @@ type kvAccountResp struct {
 	} `json:"kvOperationsAdaptiveGroups"`
 }
 
-type cloudflareResponseWAE struct {
-	Viewer struct {
-		Accounts []waeAccountResp `json:"accounts"`
-	} `json:"viewer"`
+type waeStencilRow struct {
+	Endpoint      string  `json:"endpoint"`
+	Environment   string  `json:"environment"`
+	CacheHit      string  `json:"cache_hit"`
+	AvgDurationMs float64 `json:"avg_duration_ms"`
+	RequestCount  uint64  `json:"request_count"`
 }
 
-type waeAccountResp struct {
-	MakeswiftStencilMetrics []struct {
-		Dimensions struct {
-			Blob1 string `json:"blob1"`
-			Blob4 string `json:"blob4"`
-			Blob5 string `json:"blob5"`
-		} `json:"dimensions"`
-		Avg struct {
-			Double1 float64 `json:"double1"`
-		} `json:"avg"`
-		Count uint64 `json:"count"`
-	} `json:"makeswiftStencilMetricsAdaptiveGroups"`
+type waeSQLResponse struct {
+	Data []waeStencilRow `json:"data"`
 }
 
 type cloudflareResponseSubrequests struct {
@@ -1239,45 +1235,51 @@ func fetchKVOperations(accountID string) (*cloudflareResponseKV, error) {
 	return &resp, nil
 }
 
-func fetchWAEStencilMetrics(accountID string) (*cloudflareResponseWAE, error) {
-	request := graphql.NewRequest(`
-	query ($accountID: String!, $mintime: Time!, $maxtime: Time!, $limit: Int!) {
-		viewer {
-			accounts(filter: {accountTag: $accountID}) {
-				makeswiftStencilMetricsAdaptiveGroups(limit: $limit, filter: {datetime_geq: $mintime, datetime_lt: $maxtime}) {
-					dimensions {
-						blob1
-						blob4
-						blob5
-					}
-					avg {
-						double1
-					}
-					count
-				}
-			}
-		}
-	}`)
+func fetchWAEStencilMetrics(accountID string) ([]waeStencilRow, error) {
+	now, nowAgo := GetTimeRange()
 
-	now, now1mAgo := GetTimeRange()
-	request.Var("limit", gqlQueryLimit)
-	request.Var("maxtime", now)
-	request.Var("mintime", now1mAgo)
-	request.Var("accountID", accountID)
+	query := fmt.Sprintf(`
+SELECT
+    blob1 AS endpoint,
+    blob4 AS environment,
+    blob5 AS cache_hit,
+    AVG(double1) AS avg_duration_ms,
+    COUNT() AS request_count
+FROM makeswift_stencil_metrics
+WHERE timestamp >= '%s' AND timestamp < '%s'
+GROUP BY endpoint, environment, cache_hit
+FORMAT JSON`,
+		nowAgo.Format(time.RFC3339),
+		now.Format(time.RFC3339),
+	)
 
-	gql.Mu.RLock()
-	defer gql.Mu.RUnlock()
+	url := fmt.Sprintf("https://api.cloudflare.com/client/v4/accounts/%s/analytics_engine/sql", accountID)
 
 	ctx, cancel := context.WithTimeout(context.Background(), cftimeout)
 	defer cancel()
 
-	var resp cloudflareResponseWAE
-	if err := gql.Client.Run(ctx, request, &resp); err != nil {
-		log.Errorf("error fetching WAE stencil metrics, err:%v", err)
-		return nil, err
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, strings.NewReader(query))
+	if err != nil {
+		return nil, fmt.Errorf("error creating WAE SQL request: %w", err)
 	}
 
-	return &resp, nil
+	resp, err := cfHTTPClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("error fetching WAE stencil metrics: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("WAE SQL API returned status %d: %s", resp.StatusCode, string(body))
+	}
+
+	var result waeSQLResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("error decoding WAE SQL response: %w", err)
+	}
+
+	return result.Data, nil
 }
 
 func fetchWorkerSubrequests(accountID string) (*cloudflareResponseSubrequests, error) {

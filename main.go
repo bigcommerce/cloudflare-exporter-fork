@@ -21,10 +21,11 @@ import (
 )
 
 var (
-	cfclient  *cf.Client
-	cftimeout time.Duration
-	gql       *GraphQL
-	log       = logrus.New()
+	cfclient     *cf.Client
+	cftimeout    time.Duration
+	gql          *GraphQL
+	cfHTTPClient *http.Client
+	log          = logrus.New()
 
 	// kvTrackedNamespaces is the set of KV namespace IDs that get their own
 	// namespace_id label. All other namespaces are aggregated under "other".
@@ -330,6 +331,7 @@ func main() {
 			Timeout:   cftimeout,
 			Transport: middlewares,
 		}
+		cfHTTPClient = gqlHTTPClient
 		gql = NewGraphQLClient(gqlHTTPClient)
 	} else if len(viper.GetString("cf_api_email")) > 0 && len(viper.GetString("cf_api_key")) > 0 {
 		cfclient = cf.NewClient(
@@ -343,6 +345,7 @@ func main() {
 			Timeout:   cftimeout,
 			Transport: middlewares,
 		}
+		cfHTTPClient = gqlHTTPClient
 		gql = NewGraphQLClient(gqlHTTPClient)
 	} else {
 		log.Fatal("Please provide CF_API_KEY+CF_API_EMAIL or CF_API_TOKEN")

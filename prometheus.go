@@ -773,7 +773,7 @@ func fetchWAEStencilAnalytics(account cfaccounts.Account, wg *sync.WaitGroup, de
 	wg.Add(1)
 	defer wg.Done()
 
-	r, err := fetchWAEStencilMetrics(account.ID)
+	rows, err := fetchWAEStencilMetrics(account.ID)
 	if err != nil {
 		log.Error("failed to fetch WAE stencil metrics for account ", account.ID, ": ", err)
 		return
@@ -781,18 +781,12 @@ func fetchWAEStencilAnalytics(account cfaccounts.Account, wg *sync.WaitGroup, de
 
 	accountName := strings.ToLower(strings.ReplaceAll(account.Name, " ", "-"))
 
-	for _, a := range r.Viewer.Accounts {
-		for _, m := range a.MakeswiftStencilMetrics {
-			endpoint := m.Dimensions.Blob1
-			environment := m.Dimensions.Blob4
-			cacheHit := m.Dimensions.Blob5
-
-			if !deniedMetricsSet.Has(waeStencilRequestCountMetricName) {
-				waeStencilRequestCount.With(prometheus.Labels{"endpoint": endpoint, "environment": environment, "cache_hit": cacheHit, "account": accountName}).Set(float64(m.Count))
-			}
-			if !deniedMetricsSet.Has(waeStencilAvgDurationMetricName) {
-				waeStencilAvgDuration.With(prometheus.Labels{"endpoint": endpoint, "environment": environment, "cache_hit": cacheHit, "account": accountName}).Set(m.Avg.Double1)
-			}
+	for _, row := range rows {
+		if !deniedMetricsSet.Has(waeStencilRequestCountMetricName) {
+			waeStencilRequestCount.With(prometheus.Labels{"endpoint": row.Endpoint, "environment": row.Environment, "cache_hit": row.CacheHit, "account": accountName}).Set(float64(row.RequestCount))
+		}
+		if !deniedMetricsSet.Has(waeStencilAvgDurationMetricName) {
+			waeStencilAvgDuration.With(prometheus.Labels{"endpoint": row.Endpoint, "environment": row.Environment, "cache_hit": row.CacheHit, "account": accountName}).Set(row.AvgDurationMs)
 		}
 	}
 }
