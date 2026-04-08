@@ -75,6 +75,8 @@ const (
 	queueOperationBytesMetricName                MetricName = "cloudflare_queue_operations_bytes"
 	queueOperationLagTimeMetricName              MetricName = "cloudflare_queue_operations_lag_time"
 	queueOperationRetryCountMetricName           MetricName = "cloudflare_queue_operations_retry_count"
+	waeStencilRequestCountMetricName             MetricName = "cloudflare_wae_stencil_request_count"
+	waeStencilAvgDurationMetricName              MetricName = "cloudflare_wae_stencil_avg_duration_ms"
 )
 
 type MetricsSet map[MetricName]struct{}
@@ -407,6 +409,16 @@ var (
 		Help: "DNS Firewall query count by query type and response code",
 	}, []string{"account_id", "account_name", "dns_firewall_id", "query_type", "response_code"},
 	)
+
+	waeStencilRequestCount = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: waeStencilRequestCountMetricName.String(),
+		Help: "Makeswift stencil worker request count by endpoint, environment, and cache hit",
+	}, []string{"endpoint", "environment", "cache_hit", "account"})
+
+	waeStencilAvgDuration = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: waeStencilAvgDurationMetricName.String(),
+		Help: "Makeswift stencil worker average request duration in milliseconds",
+	}, []string{"endpoint", "environment", "cache_hit", "account"})
 )
 
 func buildAllMetricsSet() MetricsSet {
@@ -465,6 +477,8 @@ func buildAllMetricsSet() MetricsSet {
 	allMetricsSet.Add(queueOperationBytesMetricName)
 	allMetricsSet.Add(queueOperationLagTimeMetricName)
 	allMetricsSet.Add(queueOperationRetryCountMetricName)
+	allMetricsSet.Add(waeStencilRequestCountMetricName)
+	allMetricsSet.Add(waeStencilAvgDurationMetricName)
 	return allMetricsSet
 }
 
@@ -647,6 +661,12 @@ func mustRegisterMetrics(deniedMetrics MetricsSet) {
 	if !deniedMetrics.Has(queueOperationRetryCountMetricName) {
 		prometheus.MustRegister(queueOperationRetryCount)
 	}
+	if !deniedMetrics.Has(waeStencilRequestCountMetricName) {
+		prometheus.MustRegister(waeStencilRequestCount)
+	}
+	if !deniedMetrics.Has(waeStencilAvgDurationMetricName) {
+		prometheus.MustRegister(waeStencilAvgDuration)
+	}
 }
 
 func fetchLoadblancerPoolsHealth(account cfaccounts.Account, wg *sync.WaitGroup) {
@@ -744,6 +764,34 @@ func fetchKVAnalytics(account cfaccounts.Account, wg *sync.WaitGroup, deniedMetr
 				kvLatency.With(prometheus.Labels{"namespace_id": nsID, "action_type": kv.Dimensions.ActionType, "account": accountName, "quantile": "P75"}).Set(float64(kv.Quantiles.LatencyMsP75))
 				kvLatency.With(prometheus.Labels{"namespace_id": nsID, "action_type": kv.Dimensions.ActionType, "account": accountName, "quantile": "P99"}).Set(float64(kv.Quantiles.LatencyMsP99))
 				kvLatency.With(prometheus.Labels{"namespace_id": nsID, "action_type": kv.Dimensions.ActionType, "account": accountName, "quantile": "P999"}).Set(float64(kv.Quantiles.LatencyMsP999))
+			}
+		}
+	}
+}
+
+func fetchWAEStencilAnalytics(account cfaccounts.Account, wg *sync.WaitGroup, deniedMetricsSet MetricsSet) {
+	wg.Add(1)
+	defer wg.Done()
+
+	r, err := fetchWAEStencilMetrics(account.ID)
+	if err != nil {
+		log.Error("failed to fetch WAE stencil metrics for account ", account.ID, ": ", err)
+		return
+	}
+
+	accountName := strings.ToLower(strings.ReplaceAll(account.Name, " ", "-"))
+
+	for _, a := range r.Viewer.Accounts {
+		for _, m := range a.MakeswiftStencilMetrics {
+			endpoint := m.Dimensions.Blob1
+			environment := m.Dimensions.Blob4
+			cacheHit := m.Dimensions.Blob5
+
+			if !deniedMetricsSet.Has(waeStencilRequestCountMetricName) {
+				waeStencilRequestCount.With(prometheus.Labels{"endpoint": endpoint, "environment": environment, "cache_hit": cacheHit, "account": accountName}).Set(float64(m.Count))
+			}
+			if !deniedMetricsSet.Has(waeStencilAvgDurationMetricName) {
+				waeStencilAvgDuration.With(prometheus.Labels{"endpoint": endpoint, "environment": environment, "cache_hit": cacheHit, "account": accountName}).Set(m.Avg.Double1)
 			}
 		}
 	}

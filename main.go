@@ -122,6 +122,7 @@ func fetchMetrics(deniedMetricsSet MetricsSet) {
 		go fetchLoadblancerPoolsHealth(a, &wg)
 		go fetchZeroTrustAnalyticsForAccount(a, &wg)
 		go fetchDNSFirewallAnalytics(a, &wg, deniedMetricsSet)
+		go fetchWAEStencilAnalytics(a, &wg, deniedMetricsSet)
 	}
 
 	zones := fetchZones(accounts)

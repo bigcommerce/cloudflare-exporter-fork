@@ -324,6 +324,26 @@ type kvAccountResp struct {
 	} `json:"kvOperationsAdaptiveGroups"`
 }
 
+type cloudflareResponseWAE struct {
+	Viewer struct {
+		Accounts []waeAccountResp `json:"accounts"`
+	} `json:"viewer"`
+}
+
+type waeAccountResp struct {
+	MakeswiftStencilMetrics []struct {
+		Dimensions struct {
+			Blob1 string `json:"blob1"`
+			Blob4 string `json:"blob4"`
+			Blob5 string `json:"blob5"`
+		} `json:"dimensions"`
+		Avg struct {
+			Double1 float64 `json:"double1"`
+		} `json:"avg"`
+		Count uint64 `json:"count"`
+	} `json:"makeswiftStencilMetricsAdaptiveGroups"`
+}
+
 type cloudflareResponseSubrequests struct {
 	Viewer struct {
 		Accounts []subrequestsAccountResp `json:"accounts"`
@@ -1213,6 +1233,47 @@ func fetchKVOperations(accountID string) (*cloudflareResponseKV, error) {
 	var resp cloudflareResponseKV
 	if err := gql.Client.Run(ctx, request, &resp); err != nil {
 		log.Errorf("error fetching KV operations, err:%v", err)
+		return nil, err
+	}
+
+	return &resp, nil
+}
+
+func fetchWAEStencilMetrics(accountID string) (*cloudflareResponseWAE, error) {
+	request := graphql.NewRequest(`
+	query ($accountID: String!, $mintime: Time!, $maxtime: Time!, $limit: Int!) {
+		viewer {
+			accounts(filter: {accountTag: $accountID}) {
+				makeswiftStencilMetricsAdaptiveGroups(limit: $limit, filter: {datetime_geq: $mintime, datetime_lt: $maxtime}) {
+					dimensions {
+						blob1
+						blob4
+						blob5
+					}
+					avg {
+						double1
+					}
+					count
+				}
+			}
+		}
+	}`)
+
+	now, now1mAgo := GetTimeRange()
+	request.Var("limit", gqlQueryLimit)
+	request.Var("maxtime", now)
+	request.Var("mintime", now1mAgo)
+	request.Var("accountID", accountID)
+
+	gql.Mu.RLock()
+	defer gql.Mu.RUnlock()
+
+	ctx, cancel := context.WithTimeout(context.Background(), cftimeout)
+	defer cancel()
+
+	var resp cloudflareResponseWAE
+	if err := gql.Client.Run(ctx, request, &resp); err != nil {
+		log.Errorf("error fetching WAE stencil metrics, err:%v", err)
 		return nil, err
 	}
 
