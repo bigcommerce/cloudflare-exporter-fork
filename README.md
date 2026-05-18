@@ -29,7 +29,7 @@ dashboard.
 Required authentication scopes:
 
 - `Zone/Analytics:Read` is required for zone-level metrics
-- `Account/Account Analytics:Read` is required for Worker metrics
+- `Account/Account Analytics:Read` is required for Worker metrics and Workers Analytics Engine (WAE) queries
 - `Account/Account Settings:Read` is required for Worker metrics (for listing accessible accounts, scraping all available
   Workers included in authentication scope)
 - `Zone/Firewall Services:Read` is required to fetch zone rule name for `cloudflare_zone_firewall_events_count` metric
@@ -67,6 +67,7 @@ The exporter can be configured using env variables or command flags.
 | `SCRAPE_INTERVAL` | scrape interval in seconds (will query cloudflare every SCRAPE_INTERVAL seconds), default `60` |
 | `METRICS_DENYLIST` | (Optional) cloudflare-exporter metrics to not export, comma delimited list of cloudflare-exporter metrics. If not set, all metrics are exported |
 | `KV_NAMESPACE_IDS` | (Optional) KV namespace IDs to track individually, comma delimited. Unlisted namespaces are aggregated as `other` |
+| `WAE_DATASET_PREFIX` | (Optional) Prefix used to discover Workers Analytics Engine (WAE) datasets via `SHOW TABLES`. Datasets matching this prefix are auto-discovered and queried; the suffix (with `_` → `-`) becomes the `script_name` label. Empty (default) disables WAE discovery. See [WAE integration](#workers-analytics-engine-wae-integration) below. |
 | `ENABLE_PPROF` | (Optional) enable pprof profiling endpoints at `/debug/pprof/`. Accepts `true` or `false`, default `false`. **Warning**: Only enable in development/debugging environments |
 | `ZONE_<NAME>` |  `DEPRECATED since 0.0.5` (optional) Zone ID. Add zones you want to scrape by adding env vars in this format. You can find the zone ids in Cloudflare dashboards. |
 | `LOG_LEVEL` | Set loglevel. Options are error, warn, info, debug. default `error` |
@@ -86,6 +87,7 @@ Corresponding flags:
   -scrape_delay=300: scrape delay in seconds, defaults to 300
   -scrape_interval=60: scrape interval in seconds, defaults to 60
   -kv_namespace_ids="": KV namespace IDs to track individually, comma delimited
+  -wae_dataset_prefix="": prefix for auto-discovered WAE datasets (empty disables discovery)
   -metrics_denylist="": cloudflare-exporter metrics to not export, comma delimited list
   -enable_pprof=false: enable pprof profiling endpoints at /debug/pprof/
   -log_level="error": log level(error,warn,info,debug)
@@ -140,7 +142,36 @@ Note: `ZONE_<name>` configuration is not supported as flag.
 # HELP cloudflare_queue_operations_bytes Total bytes processed by queue message operations
 # HELP cloudflare_queue_operations_lag_time Average lag time between write and read/delete (milliseconds)
 # HELP cloudflare_queue_operations_retry_count Average retry count for queue message operations
+# HELP cloudflare_worker_operation_duration_seconds Average duration of a worker operation in seconds, sliced by metric_type (worker-defined event type) and label (worker-defined slice)
 ```
+
+## Workers Analytics Engine (WAE) integration
+
+The exporter can scrape Cloudflare Workers Analytics Engine datasets and expose them as Prometheus metrics. WAE datasets are auto-discovered by name prefix — no per-worker configuration in the exporter is required.
+
+Discovery is **disabled by default**. Set `WAE_DATASET_PREFIX` (e.g. `my_worker_metrics_`) to enable.
+
+### Onboarding a new worker
+
+1. In your worker's wrangler config, define a WAE binding whose dataset name follows the convention `<WAE_DATASET_PREFIX><script_name_underscored>`. For example, with a configured prefix of `my_worker_metrics_`, a worker called `my-service-prod` names its dataset `my_worker_metrics_my_service_prod`. WAE dataset names must be valid SQL identifiers, so dashes are forbidden; the exporter converts the suffix back to dashes when emitting the `script_name` label.
+
+2. Emit data points with the following schema:
+
+   | Field | Meaning |
+   |---|---|
+   | `index1` | metric_type string — categorizes the operation (e.g. `origin_fetch`, `api_call`) |
+   | `blob1` | label — secondary slicing dimension (e.g. status, endpoint) |
+   | `double1` | duration in milliseconds |
+
+   Additional `blobN` / `doubleN` fields are ignored by the exporter; they're for your own diagnostic queries against WAE.
+
+3. Deploy. On the next scrape cycle the exporter will discover the dataset and expose `cloudflare_worker_operation_duration_seconds` series labeled with your `script_name`, `metric_type` (from `index1`), and `label` (from `blob1`).
+
+### Notes
+
+- The WAE aggregation window is 5 minutes. If your worker is low-traffic, expect series to disappear when traffic doesn't land in the window.
+- Series for a `script_name` whose dataset no longer exists (or has had no traffic in the window) are automatically removed from `/metrics` — they don't go stale at their last value.
+- Discovery uses `SHOW TABLES` against the WAE SQL API and requires `Account/Account Analytics:Read`.
 
 ## Helm chart repository
 
