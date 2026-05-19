@@ -412,8 +412,8 @@ var (
 
 	workerOperationDuration = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 		Name: workerOperationDurationMetricName.String(),
-		Help: "Average duration of a worker operation in seconds, sliced by metric_type (worker-defined event type) and label (worker-defined slice)",
-	}, []string{"script_name", "account", "metric_type", "label"})
+		Help: "Worker operation duration quantiles in seconds, sliced by metric_type (worker-defined event type), label (worker-defined slice), and quantile (P50, P75, P99, P999)",
+	}, []string{"script_name", "account", "metric_type", "label", "quantile"})
 )
 
 func buildAllMetricsSet() MetricsSet {
@@ -1407,8 +1407,10 @@ func fetchWorkerWAEAnalytics(account cfaccounts.Account, wg *sync.WaitGroup, den
 			SELECT
 				index1 AS metric_type,
 				blob1 AS label,
-				SUM(_sample_interval * double1) / SUM(_sample_interval) AS avg_duration_ms,
-				SUM(_sample_interval) AS total_requests
+				quantileWeighted(0.50, double1, _sample_interval) AS p50_ms,
+				quantileWeighted(0.75, double1, _sample_interval) AS p75_ms,
+				quantileWeighted(0.99, double1, _sample_interval) AS p99_ms,
+				quantileWeighted(0.999, double1, _sample_interval) AS p999_ms
 			FROM %s
 			WHERE timestamp > NOW() - INTERVAL '5' MINUTE
 			GROUP BY index1, blob1
@@ -1424,20 +1426,33 @@ func fetchWorkerWAEAnalytics(account cfaccounts.Account, wg *sync.WaitGroup, den
 			continue
 		}
 
+		quantiles := []struct {
+			column string
+			label  string
+		}{
+			{"p50_ms", "P50"},
+			{"p75_ms", "P75"},
+			{"p99_ms", "P99"},
+			{"p999_ms", "P999"},
+		}
+
 		for _, row := range resp.Data {
 			metricType, _ := row["metric_type"].(string)
 			label, _ := row["label"].(string)
-			avgDurationMs, _ := row["avg_duration_ms"].(float64)
 			if metricType == "" {
 				continue
 			}
 
-			workerOperationDuration.With(prometheus.Labels{
-				"script_name": scriptName,
-				"account":     accountName,
-				"metric_type": metricType,
-				"label":       label,
-			}).Set(avgDurationMs / 1000.0)
+			for _, q := range quantiles {
+				val, _ := row[q.column].(float64)
+				workerOperationDuration.With(prometheus.Labels{
+					"script_name": scriptName,
+					"account":     accountName,
+					"metric_type": metricType,
+					"label":       label,
+					"quantile":    q.label,
+				}).Set(val / 1000.0)
+			}
 		}
 	}
 }
