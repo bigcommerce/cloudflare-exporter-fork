@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"strconv"
 	"strings"
@@ -75,6 +76,7 @@ const (
 	queueOperationBytesMetricName                MetricName = "cloudflare_queue_operations_bytes"
 	queueOperationLagTimeMetricName              MetricName = "cloudflare_queue_operations_lag_time"
 	queueOperationRetryCountMetricName           MetricName = "cloudflare_queue_operations_retry_count"
+	workerOperationDurationMetricName            MetricName = "cloudflare_worker_operation_duration_seconds"
 )
 
 type MetricsSet map[MetricName]struct{}
@@ -407,6 +409,11 @@ var (
 		Help: "DNS Firewall query count by query type and response code",
 	}, []string{"account_id", "account_name", "dns_firewall_id", "query_type", "response_code"},
 	)
+
+	workerOperationDuration = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: workerOperationDurationMetricName.String(),
+		Help: "Average duration of a worker operation in seconds, sliced by metric_type (worker-defined event type) and label (worker-defined slice)",
+	}, []string{"script_name", "account", "metric_type", "label"})
 )
 
 func buildAllMetricsSet() MetricsSet {
@@ -465,6 +472,7 @@ func buildAllMetricsSet() MetricsSet {
 	allMetricsSet.Add(queueOperationBytesMetricName)
 	allMetricsSet.Add(queueOperationLagTimeMetricName)
 	allMetricsSet.Add(queueOperationRetryCountMetricName)
+	allMetricsSet.Add(workerOperationDurationMetricName)
 	return allMetricsSet
 }
 
@@ -646,6 +654,9 @@ func mustRegisterMetrics(deniedMetrics MetricsSet) {
 	}
 	if !deniedMetrics.Has(queueOperationRetryCountMetricName) {
 		prometheus.MustRegister(queueOperationRetryCount)
+	}
+	if !deniedMetrics.Has(workerOperationDurationMetricName) {
+		prometheus.MustRegister(workerOperationDuration)
 	}
 }
 
@@ -1344,6 +1355,89 @@ func addCloudflareTunnelStatus(account cfaccounts.Account) {
 					"tunnel_id": t.ID,
 					"client_id": c.ID,
 				}).Set(float64(len(c.Conns)))
+		}
+	}
+}
+
+// fetchWorkerWAEAnalytics discovers all WAE datasets in the account that match
+// the configured prefix and queries each one for worker metrics. The dataset
+// name's suffix (with underscores converted to dashes) is emitted as the
+// script_name label so the series are joinable with cloudflare_worker_* metrics.
+func fetchWorkerWAEAnalytics(account cfaccounts.Account, wg *sync.WaitGroup, deniedMetricsSet MetricsSet) {
+	wg.Add(1)
+	defer wg.Done()
+
+	prefix := viper.GetString("wae_dataset_prefix")
+	if prefix == "" {
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), cftimeout)
+	defer cancel()
+
+	listResp, err := waeClient.Query(ctx, account.ID, "SHOW TABLES")
+	if err != nil {
+		log.Error("failed to list WAE datasets for account ", account.ID, ": ", err)
+		return
+	}
+
+	var datasets []string
+	for _, row := range listResp.Data {
+		name, _ := row["dataset"].(string)
+		if strings.HasPrefix(name, prefix) {
+			datasets = append(datasets, name)
+		}
+	}
+	if len(datasets) == 0 {
+		log.Debugf("no WAE datasets matched prefix %q in account %s", prefix, account.ID)
+		return
+	}
+
+	accountName := strings.ToLower(strings.ReplaceAll(account.Name, " ", "-"))
+
+	// Drop this account's previous label combinations so labels that no longer
+	// see traffic (or scripts that no longer exist) disappear instead of going
+	// stale at their last value.
+	workerOperationDuration.DeletePartialMatch(prometheus.Labels{"account": accountName})
+
+	for _, dataset := range datasets {
+		scriptName := strings.ReplaceAll(strings.TrimPrefix(dataset, prefix), "_", "-")
+
+		query := fmt.Sprintf(`
+			SELECT
+				index1 AS metric_type,
+				blob1 AS label,
+				SUM(_sample_interval * double1) / SUM(_sample_interval) AS avg_duration_ms,
+				SUM(_sample_interval) AS total_requests
+			FROM %s
+			WHERE timestamp > NOW() - INTERVAL '5' MINUTE
+			GROUP BY index1, blob1
+			FORMAT JSON`, dataset)
+
+		resp, err := waeClient.Query(ctx, account.ID, query)
+		if err != nil {
+			log.Errorf("failed to fetch WAE analytics from %s (account %s): %v", dataset, account.ID, err)
+			continue
+		}
+
+		if deniedMetricsSet.Has(workerOperationDurationMetricName) {
+			continue
+		}
+
+		for _, row := range resp.Data {
+			metricType, _ := row["metric_type"].(string)
+			label, _ := row["label"].(string)
+			avgDurationMs, _ := row["avg_duration_ms"].(float64)
+			if metricType == "" {
+				continue
+			}
+
+			workerOperationDuration.With(prometheus.Labels{
+				"script_name": scriptName,
+				"account":     accountName,
+				"metric_type": metricType,
+				"label":       label,
+			}).Set(avgDurationMs / 1000.0)
 		}
 	}
 }

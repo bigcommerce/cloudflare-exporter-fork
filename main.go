@@ -24,6 +24,7 @@ var (
 	cfclient  *cf.Client
 	cftimeout time.Duration
 	gql       *GraphQL
+	waeClient *WAEClient
 	log       = logrus.New()
 
 	// kvTrackedNamespaces is the set of KV namespace IDs that get their own
@@ -122,6 +123,7 @@ func fetchMetrics(deniedMetricsSet MetricsSet) {
 		go fetchLoadblancerPoolsHealth(a, &wg)
 		go fetchZeroTrustAnalyticsForAccount(a, &wg)
 		go fetchDNSFirewallAnalytics(a, &wg, deniedMetricsSet)
+		go fetchWorkerWAEAnalytics(a, &wg, deniedMetricsSet)
 	}
 
 	zones := fetchZones(accounts)
@@ -283,6 +285,10 @@ func main() {
 	viper.BindEnv("metrics_denylist")
 	viper.SetDefault("metrics_denylist", "")
 
+	flags.String("wae_dataset_prefix", "", "Prefix used to discover Cloudflare Workers Analytics Engine datasets via SHOW TABLES. The remainder of each dataset name (with underscores converted to dashes) is emitted as the script_name label. Empty (default) disables WAE discovery.")
+	viper.BindEnv("wae_dataset_prefix")
+	viper.SetDefault("wae_dataset_prefix", "")
+
 	flags.String("log_level", "info", "log level")
 	viper.BindEnv("log_level")
 	viper.SetDefault("log_level", "info")
@@ -330,6 +336,7 @@ func main() {
 			Transport: middlewares,
 		}
 		gql = NewGraphQLClient(gqlHTTPClient)
+		waeClient = NewWAEClient(gqlHTTPClient)
 	} else if len(viper.GetString("cf_api_email")) > 0 && len(viper.GetString("cf_api_key")) > 0 {
 		cfclient = cf.NewClient(
 			cfoption.WithAPIKey(viper.GetString("cf_api_key")),
@@ -343,6 +350,7 @@ func main() {
 			Transport: middlewares,
 		}
 		gql = NewGraphQLClient(gqlHTTPClient)
+		waeClient = NewWAEClient(gqlHTTPClient)
 	} else {
 		log.Fatal("Please provide CF_API_KEY+CF_API_EMAIL or CF_API_TOKEN")
 	}
