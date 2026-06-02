@@ -77,6 +77,7 @@ const (
 	queueOperationLagTimeMetricName              MetricName = "cloudflare_queue_operations_lag_time"
 	queueOperationRetryCountMetricName           MetricName = "cloudflare_queue_operations_retry_count"
 	workerOperationDurationMetricName            MetricName = "cloudflare_worker_operation_duration_seconds"
+	workerOperationCountMetricName               MetricName = "cloudflare_worker_operation_count"
 )
 
 type MetricsSet map[MetricName]struct{}
@@ -414,6 +415,11 @@ var (
 		Name: workerOperationDurationMetricName.String(),
 		Help: "Worker operation duration quantiles in seconds, sliced by metric_type (worker-defined event type), label (worker-defined slice), and quantile (P50, P75, P99, P999)",
 	}, []string{"script_name", "account", "metric_type", "label", "quantile"})
+
+	workerOperationCount = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: workerOperationCountMetricName.String(),
+		Help: "Worker operation count in the last 5 minutes, sliced by metric_type (worker-defined event type) and label (worker-defined slice). Windowed sum, not a cumulative counter.",
+	}, []string{"script_name", "account", "metric_type", "label"})
 )
 
 func buildAllMetricsSet() MetricsSet {
@@ -473,6 +479,7 @@ func buildAllMetricsSet() MetricsSet {
 	allMetricsSet.Add(queueOperationLagTimeMetricName)
 	allMetricsSet.Add(queueOperationRetryCountMetricName)
 	allMetricsSet.Add(workerOperationDurationMetricName)
+	allMetricsSet.Add(workerOperationCountMetricName)
 	return allMetricsSet
 }
 
@@ -657,6 +664,9 @@ func mustRegisterMetrics(deniedMetrics MetricsSet) {
 	}
 	if !deniedMetrics.Has(workerOperationDurationMetricName) {
 		prometheus.MustRegister(workerOperationDuration)
+	}
+	if !deniedMetrics.Has(workerOperationCountMetricName) {
+		prometheus.MustRegister(workerOperationCount)
 	}
 }
 
@@ -1359,6 +1369,28 @@ func addCloudflareTunnelStatus(account cfaccounts.Account) {
 	}
 }
 
+// waeFloat coerces a value from a decoded WAE JSON row into a float64. The SQL
+// API returns Float64 columns (e.g. quantiles) as JSON numbers, but renders
+// 64-bit integer results such as sum(_sample_interval) as quoted strings to
+// preserve precision. Both are expected and handled quietly; anything else is
+// logged because it means the data is wrong (bad numeric string, or a column
+// missing/renamed), not just a different-but-valid representation.
+func waeFloat(column string, v interface{}) float64 {
+	switch n := v.(type) {
+	case float64:
+		return n
+	case string:
+		f, err := strconv.ParseFloat(n, 64)
+		if err != nil {
+			log.Errorf("WAE column %q: could not parse %q as float: %v", column, n, err)
+		}
+		return f
+	default:
+		log.Warnf("WAE column %q has unexpected type %T", column, v)
+		return 0
+	}
+}
+
 // fetchWorkerWAEAnalytics discovers all WAE datasets in the account that match
 // the configured prefix and queries each one for worker metrics. The dataset
 // name's suffix (with underscores converted to dashes) is emitted as the
@@ -1399,6 +1431,7 @@ func fetchWorkerWAEAnalytics(account cfaccounts.Account, wg *sync.WaitGroup, den
 	// see traffic (or scripts that no longer exist) disappear instead of going
 	// stale at their last value.
 	workerOperationDuration.DeletePartialMatch(prometheus.Labels{"account": accountName})
+	workerOperationCount.DeletePartialMatch(prometheus.Labels{"account": accountName})
 
 	for _, dataset := range datasets {
 		scriptName := strings.ReplaceAll(strings.TrimPrefix(dataset, prefix), "_", "-")
@@ -1407,6 +1440,7 @@ func fetchWorkerWAEAnalytics(account cfaccounts.Account, wg *sync.WaitGroup, den
 			SELECT
 				index1 AS metric_type,
 				blob1 AS label,
+				sum(_sample_interval) AS count,
 				quantileWeighted(0.50, double1, _sample_interval) AS p50_ms,
 				quantileWeighted(0.75, double1, _sample_interval) AS p75_ms,
 				quantileWeighted(0.99, double1, _sample_interval) AS p99_ms,
@@ -1422,7 +1456,9 @@ func fetchWorkerWAEAnalytics(account cfaccounts.Account, wg *sync.WaitGroup, den
 			continue
 		}
 
-		if deniedMetricsSet.Has(workerOperationDurationMetricName) {
+		durationDenied := deniedMetricsSet.Has(workerOperationDurationMetricName)
+		countDenied := deniedMetricsSet.Has(workerOperationCountMetricName)
+		if durationDenied && countDenied {
 			continue
 		}
 
@@ -1443,15 +1479,27 @@ func fetchWorkerWAEAnalytics(account cfaccounts.Account, wg *sync.WaitGroup, den
 				continue
 			}
 
-			for _, q := range quantiles {
-				val, _ := row[q.column].(float64)
-				workerOperationDuration.With(prometheus.Labels{
+			if !durationDenied {
+				for _, q := range quantiles {
+					val, _ := row[q.column].(float64)
+					workerOperationDuration.With(prometheus.Labels{
+						"script_name": scriptName,
+						"account":     accountName,
+						"metric_type": metricType,
+						"label":       label,
+						"quantile":    q.label,
+					}).Set(val / 1000.0)
+				}
+			}
+
+			if !countDenied {
+				count := waeFloat("count", row["count"])
+				workerOperationCount.With(prometheus.Labels{
 					"script_name": scriptName,
 					"account":     accountName,
 					"metric_type": metricType,
 					"label":       label,
-					"quantile":    q.label,
-				}).Set(val / 1000.0)
+				}).Set(count)
 			}
 		}
 	}
