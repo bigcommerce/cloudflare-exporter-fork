@@ -143,6 +143,7 @@ Note: `ZONE_<name>` configuration is not supported as flag.
 # HELP cloudflare_queue_operations_lag_time Average lag time between write and read/delete (milliseconds)
 # HELP cloudflare_queue_operations_retry_count Average retry count for queue message operations
 # HELP cloudflare_worker_operation_duration_seconds Average duration of a worker operation in seconds, sliced by metric_type (worker-defined event type) and label (worker-defined slice)
+# HELP cloudflare_worker_operation_count Worker operation count in the last 5 minutes, sliced by metric_type (worker-defined event type) and label (worker-defined slice). Windowed sum, not a cumulative counter.
 ```
 
 ## Workers Analytics Engine (WAE) integration
@@ -165,7 +166,9 @@ Discovery is **disabled by default**. Set `WAE_DATASET_PREFIX` (e.g. `my_worker_
 
    Additional `blobN` / `doubleN` fields are ignored by the exporter; they're for your own diagnostic queries against WAE.
 
-3. Deploy. On the next scrape cycle the exporter will discover the dataset and expose `cloudflare_worker_operation_duration_seconds` series labeled with your `script_name`, `metric_type` (from `index1`), and `label` (from `blob1`).
+3. Deploy. On the next scrape cycle the exporter will discover the dataset and expose two metrics, both labeled with your `script_name`, `metric_type` (from `index1`), and `label` (from `blob1`):
+   - `cloudflare_worker_operation_duration_seconds` — duration quantiles, derived from `double1`.
+   - `cloudflare_worker_operation_count` — the windowed event count (`sum(_sample_interval)` over the 5-minute window). This is a gauge, not a cumulative counter, so consume it directly — do **not** apply `rate()`.
 
 ### Notes
 
