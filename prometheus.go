@@ -252,31 +252,31 @@ var (
 	workerRequests = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: workerRequestsMetricName.String(),
 		Help: "Number of requests sent to worker by script name",
-	}, []string{"script_name", "account", "status"},
+	}, []string{"script_name", "dispatch_namespace", "account", "status"},
 	)
 
 	workerErrors = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: workerErrorsMetricName.String(),
 		Help: "Number of errors by script name",
-	}, []string{"script_name", "account", "status"},
+	}, []string{"script_name", "dispatch_namespace", "account", "status"},
 	)
 
 	workerCPUTime = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 		Name: workerCPUTimeMetricName.String(),
 		Help: "CPU time quantiles by script name",
-	}, []string{"script_name", "account", "status", "quantile"},
+	}, []string{"script_name", "dispatch_namespace", "account", "status", "quantile"},
 	)
 
 	workerDuration = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 		Name: workerDurationMetricName.String(),
 		Help: "Duration quantiles by script name (GB*s)",
-	}, []string{"script_name", "account", "status", "quantile"},
+	}, []string{"script_name", "dispatch_namespace", "account", "status", "quantile"},
 	)
 
 	workerWallTime = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 		Name: workerWallTimeMetricName.String(),
 		Help: "Wall time quantiles by script name (microseconds)",
-	}, []string{"script_name", "account", "status", "quantile"},
+	}, []string{"script_name", "dispatch_namespace", "account", "status", "quantile"},
 	)
 
 	poolHealthStatus = prometheus.NewGaugeVec(prometheus.GaugeOpts{
@@ -720,20 +720,20 @@ func fetchWorkerAnalytics(account cfaccounts.Account, wg *sync.WaitGroup) {
 
 	for _, a := range r.Viewer.Accounts {
 		for _, w := range a.WorkersInvocationsAdaptive {
-			workerRequests.With(prometheus.Labels{"script_name": w.Dimensions.ScriptName, "account": accountName, "status": w.Dimensions.Status}).Add(float64(w.Sum.Requests))
-			workerErrors.With(prometheus.Labels{"script_name": w.Dimensions.ScriptName, "account": accountName, "status": w.Dimensions.Status}).Add(float64(w.Sum.Errors))
-			workerCPUTime.With(prometheus.Labels{"script_name": w.Dimensions.ScriptName, "account": accountName, "status": w.Dimensions.Status, "quantile": "P50"}).Set(float64(w.Quantiles.CPUTimeP50))
-			workerCPUTime.With(prometheus.Labels{"script_name": w.Dimensions.ScriptName, "account": accountName, "status": w.Dimensions.Status, "quantile": "P75"}).Set(float64(w.Quantiles.CPUTimeP75))
-			workerCPUTime.With(prometheus.Labels{"script_name": w.Dimensions.ScriptName, "account": accountName, "status": w.Dimensions.Status, "quantile": "P99"}).Set(float64(w.Quantiles.CPUTimeP99))
-			workerCPUTime.With(prometheus.Labels{"script_name": w.Dimensions.ScriptName, "account": accountName, "status": w.Dimensions.Status, "quantile": "P999"}).Set(float64(w.Quantiles.CPUTimeP999))
-			workerDuration.With(prometheus.Labels{"script_name": w.Dimensions.ScriptName, "account": accountName, "status": w.Dimensions.Status, "quantile": "P50"}).Set(float64(w.Quantiles.DurationP50))
-			workerDuration.With(prometheus.Labels{"script_name": w.Dimensions.ScriptName, "account": accountName, "status": w.Dimensions.Status, "quantile": "P75"}).Set(float64(w.Quantiles.DurationP75))
-			workerDuration.With(prometheus.Labels{"script_name": w.Dimensions.ScriptName, "account": accountName, "status": w.Dimensions.Status, "quantile": "P99"}).Set(float64(w.Quantiles.DurationP99))
-			workerDuration.With(prometheus.Labels{"script_name": w.Dimensions.ScriptName, "account": accountName, "status": w.Dimensions.Status, "quantile": "P999"}).Set(float64(w.Quantiles.DurationP999))
-			workerWallTime.With(prometheus.Labels{"script_name": w.Dimensions.ScriptName, "account": accountName, "status": w.Dimensions.Status, "quantile": "P50"}).Set(float64(w.Quantiles.WallTimeP50))
-			workerWallTime.With(prometheus.Labels{"script_name": w.Dimensions.ScriptName, "account": accountName, "status": w.Dimensions.Status, "quantile": "P75"}).Set(float64(w.Quantiles.WallTimeP75))
-			workerWallTime.With(prometheus.Labels{"script_name": w.Dimensions.ScriptName, "account": accountName, "status": w.Dimensions.Status, "quantile": "P99"}).Set(float64(w.Quantiles.WallTimeP99))
-			workerWallTime.With(prometheus.Labels{"script_name": w.Dimensions.ScriptName, "account": accountName, "status": w.Dimensions.Status, "quantile": "P999"}).Set(float64(w.Quantiles.WallTimeP999))
+			workerRequests.With(prometheus.Labels{"script_name": w.Dimensions.ScriptName, "dispatch_namespace": w.Dimensions.DispatchNamespaceName, "account": accountName, "status": w.Dimensions.Status}).Add(float64(w.Sum.Requests))
+			workerErrors.With(prometheus.Labels{"script_name": w.Dimensions.ScriptName, "dispatch_namespace": w.Dimensions.DispatchNamespaceName, "account": accountName, "status": w.Dimensions.Status}).Add(float64(w.Sum.Errors))
+			workerCPUTime.With(prometheus.Labels{"script_name": w.Dimensions.ScriptName, "dispatch_namespace": w.Dimensions.DispatchNamespaceName, "account": accountName, "status": w.Dimensions.Status, "quantile": "P50"}).Set(float64(w.Quantiles.CPUTimeP50))
+			workerCPUTime.With(prometheus.Labels{"script_name": w.Dimensions.ScriptName, "dispatch_namespace": w.Dimensions.DispatchNamespaceName, "account": accountName, "status": w.Dimensions.Status, "quantile": "P75"}).Set(float64(w.Quantiles.CPUTimeP75))
+			workerCPUTime.With(prometheus.Labels{"script_name": w.Dimensions.ScriptName, "dispatch_namespace": w.Dimensions.DispatchNamespaceName, "account": accountName, "status": w.Dimensions.Status, "quantile": "P99"}).Set(float64(w.Quantiles.CPUTimeP99))
+			workerCPUTime.With(prometheus.Labels{"script_name": w.Dimensions.ScriptName, "dispatch_namespace": w.Dimensions.DispatchNamespaceName, "account": accountName, "status": w.Dimensions.Status, "quantile": "P999"}).Set(float64(w.Quantiles.CPUTimeP999))
+			workerDuration.With(prometheus.Labels{"script_name": w.Dimensions.ScriptName, "dispatch_namespace": w.Dimensions.DispatchNamespaceName, "account": accountName, "status": w.Dimensions.Status, "quantile": "P50"}).Set(float64(w.Quantiles.DurationP50))
+			workerDuration.With(prometheus.Labels{"script_name": w.Dimensions.ScriptName, "dispatch_namespace": w.Dimensions.DispatchNamespaceName, "account": accountName, "status": w.Dimensions.Status, "quantile": "P75"}).Set(float64(w.Quantiles.DurationP75))
+			workerDuration.With(prometheus.Labels{"script_name": w.Dimensions.ScriptName, "dispatch_namespace": w.Dimensions.DispatchNamespaceName, "account": accountName, "status": w.Dimensions.Status, "quantile": "P99"}).Set(float64(w.Quantiles.DurationP99))
+			workerDuration.With(prometheus.Labels{"script_name": w.Dimensions.ScriptName, "dispatch_namespace": w.Dimensions.DispatchNamespaceName, "account": accountName, "status": w.Dimensions.Status, "quantile": "P999"}).Set(float64(w.Quantiles.DurationP999))
+			workerWallTime.With(prometheus.Labels{"script_name": w.Dimensions.ScriptName, "dispatch_namespace": w.Dimensions.DispatchNamespaceName, "account": accountName, "status": w.Dimensions.Status, "quantile": "P50"}).Set(float64(w.Quantiles.WallTimeP50))
+			workerWallTime.With(prometheus.Labels{"script_name": w.Dimensions.ScriptName, "dispatch_namespace": w.Dimensions.DispatchNamespaceName, "account": accountName, "status": w.Dimensions.Status, "quantile": "P75"}).Set(float64(w.Quantiles.WallTimeP75))
+			workerWallTime.With(prometheus.Labels{"script_name": w.Dimensions.ScriptName, "dispatch_namespace": w.Dimensions.DispatchNamespaceName, "account": accountName, "status": w.Dimensions.Status, "quantile": "P99"}).Set(float64(w.Quantiles.WallTimeP99))
+			workerWallTime.With(prometheus.Labels{"script_name": w.Dimensions.ScriptName, "dispatch_namespace": w.Dimensions.DispatchNamespaceName, "account": accountName, "status": w.Dimensions.Status, "quantile": "P999"}).Set(float64(w.Quantiles.WallTimeP999))
 		}
 	}
 }

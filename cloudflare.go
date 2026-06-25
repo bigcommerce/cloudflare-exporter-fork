@@ -104,8 +104,9 @@ type logpushResponse struct {
 type accountResp struct {
 	WorkersInvocationsAdaptive []struct {
 		Dimensions struct {
-			ScriptName string `json:"scriptName"`
-			Status     string `json:"status"`
+			ScriptName            string `json:"scriptName"`
+			DispatchNamespaceName string `json:"dispatchNamespaceName"`
+			Status                string `json:"status"`
 		}
 
 		Sum struct {
@@ -812,6 +813,7 @@ func fetchWorkerTotals(accountID string) (*cloudflareResponseAccts, error) {
 				workersInvocationsAdaptive(limit: $limit, filter: { datetime_geq: $mintime, datetime_lt: $maxtime}) {
 					dimensions {
 						scriptName
+						dispatchNamespaceName
 						status
 					}
 
