@@ -815,6 +815,18 @@ func fetchQueueAnalytics(account cfaccounts.Account, wg *sync.WaitGroup, deniedM
 
 	accountName := strings.ToLower(strings.ReplaceAll(account.Name, " ", "-"))
 
+	// Drop this account's previous label combinations so queues that have gone
+	// idle (or no longer exist) disappear instead of holding their last-seen
+	// value forever — Cloudflare's queueBacklogAdaptiveGroups only emits rows
+	// for queues with activity in the scrape window.
+	queueBacklogMessages.DeletePartialMatch(prometheus.Labels{"account": accountName})
+	queueBacklogBytes.DeletePartialMatch(prometheus.Labels{"account": accountName})
+	queueConsumerConcurrency.DeletePartialMatch(prometheus.Labels{"account": accountName})
+	queueOperations.DeletePartialMatch(prometheus.Labels{"account": accountName})
+	queueOperationBytes.DeletePartialMatch(prometheus.Labels{"account": accountName})
+	queueOperationLagTime.DeletePartialMatch(prometheus.Labels{"account": accountName})
+	queueOperationRetryCount.DeletePartialMatch(prometheus.Labels{"account": accountName})
+
 	resolveQueueName := func(queueID string) string {
 		if name, ok := names[queueID]; ok {
 			return name
