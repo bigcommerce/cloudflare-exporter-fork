@@ -815,10 +815,8 @@ func fetchQueueAnalytics(account cfaccounts.Account, wg *sync.WaitGroup, deniedM
 
 	accountName := strings.ToLower(strings.ReplaceAll(account.Name, " ", "-"))
 
-	// Drop this account's previous label combinations so queues that have gone
-	// idle (or no longer exist) disappear instead of holding their last-seen
-	// value forever — Cloudflare's queueBacklogAdaptiveGroups only emits rows
-	// for queues with activity in the scrape window.
+	// Drop this account's previous label combinations so queues that no longer
+	// exist disappear instead of holding their last-seen value forever.
 	queueBacklogMessages.DeletePartialMatch(prometheus.Labels{"account": accountName})
 	queueBacklogBytes.DeletePartialMatch(prometheus.Labels{"account": accountName})
 	queueConsumerConcurrency.DeletePartialMatch(prometheus.Labels{"account": accountName})
@@ -826,6 +824,25 @@ func fetchQueueAnalytics(account cfaccounts.Account, wg *sync.WaitGroup, deniedM
 	queueOperationBytes.DeletePartialMatch(prometheus.Labels{"account": accountName})
 	queueOperationLagTime.DeletePartialMatch(prometheus.Labels{"account": accountName})
 	queueOperationRetryCount.DeletePartialMatch(prometheus.Labels{"account": accountName})
+
+	// Seed every currently known queue at zero before applying this scrape's
+	// real values. Cloudflare's queueBacklogAdaptiveGroups/
+	// queueConsumerMetricsAdaptiveGroups only emit rows for queues with
+	// activity in the scrape window, so without this an idle queue would
+	// disappear from /metrics entirely instead of reading zero. The 4
+	// operation-metric gauges below aren't seeded because their action_type/
+	// outcome label combinations aren't known ahead of time.
+	for _, qName := range names {
+		if !deniedMetricsSet.Has(queueBacklogMessagesMetricName) {
+			queueBacklogMessages.With(prometheus.Labels{"queue_name": qName, "account": accountName}).Set(0)
+		}
+		if !deniedMetricsSet.Has(queueBacklogBytesMetricName) {
+			queueBacklogBytes.With(prometheus.Labels{"queue_name": qName, "account": accountName}).Set(0)
+		}
+		if !deniedMetricsSet.Has(queueConsumerConcurrencyMetricName) {
+			queueConsumerConcurrency.With(prometheus.Labels{"queue_name": qName, "account": accountName}).Set(0)
+		}
+	}
 
 	resolveQueueName := func(queueID string) string {
 		if name, ok := names[queueID]; ok {
